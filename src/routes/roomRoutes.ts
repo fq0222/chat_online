@@ -15,6 +15,29 @@ const logger = createLogger('房间接口');
 export function createRoomRouter(roomService: RoomService, authService: AuthService): Router {
   const router = Router();
 
+  router.get('/', async (request, response) => {
+    const session = authService.verifyToken(getBearerToken(request.headers.authorization));
+
+    if (!session || session.isBootstrap) {
+      response.status(401).json({ message: '管理员未登录' });
+      return;
+    }
+
+    const rooms = await roomService.listAdminRooms(session.adminId);
+    response.json({ rooms });
+  });
+
+  router.get('/share/:shareSlug', async (request, response) => {
+    const room = await roomService.getRoomByShareSlug(request.params.shareSlug);
+
+    if (!room) {
+      response.status(404).json({ message: '聊天室不存在或已关闭' });
+      return;
+    }
+
+    response.json({ room });
+  });
+
   router.post('/', async (request, response) => {
     const session = authService.verifyToken(getBearerToken(request.headers.authorization));
 
@@ -46,6 +69,25 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
       return;
     }
 
+    response.json({ room });
+  });
+
+  router.delete('/:roomId', async (request, response) => {
+    const session = authService.verifyToken(getBearerToken(request.headers.authorization));
+
+    if (!session || session.isBootstrap) {
+      response.status(401).json({ message: '管理员未登录' });
+      return;
+    }
+
+    const room = await roomService.closeRoom(request.params.roomId, session.adminId);
+
+    if (!room) {
+      response.status(404).json({ message: '聊天室不存在' });
+      return;
+    }
+
+    logger.info(`聊天室已关闭：${room.id}`);
     response.json({ room });
   });
 

@@ -51,6 +51,26 @@ class MemoryRoomRepository implements RoomRepository {
   async findById(id: string): Promise<RoomRecord | null> {
     return this.rooms.find((room) => room.id === id) ?? null;
   }
+
+  async findByAdminId(adminId: string): Promise<RoomRecord[]> {
+    return this.rooms.filter((room) => room.adminId === adminId);
+  }
+
+  async findByShareSlug(shareSlug: string): Promise<RoomRecord | null> {
+    return this.rooms.find((room) => room.shareSlug === shareSlug) ?? null;
+  }
+
+  async updateStatus(id: string, adminId: string, status: 'active' | 'closed'): Promise<RoomRecord | null> {
+    const room = this.rooms.find((item) => item.id === id && item.adminId === adminId);
+
+    if (!room) {
+      return null;
+    }
+
+    room.status = status;
+    room.updatedAt = new Date();
+    return room;
+  }
 }
 
 async function createTestServer() {
@@ -114,6 +134,57 @@ test('管理员可以创建房间并查询基础信息', async () => {
     assert.equal(getResponse.status, 200);
     assert.equal(getBody.room.id, createBody.room.id);
     assert.equal(Object.hasOwn(getBody.room, 'messages'), false);
+  } finally {
+    await server.close();
+  }
+});
+
+test('管理员可以列出自己的房间并关闭房间', async () => {
+  const server = await createTestServer();
+
+  try {
+    const token = await login(server.baseUrl);
+    const createResponse = await fetch(`${server.baseUrl}/api/rooms`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const createBody = await createResponse.json();
+    const listResponse = await fetch(`${server.baseUrl}/api/rooms`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const listBody = await listResponse.json();
+    const closeResponse = await fetch(`${server.baseUrl}/api/rooms/${createBody.room.id}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const closeBody = await closeResponse.json();
+
+    assert.equal(listResponse.status, 200);
+    assert.equal(listBody.rooms.length, 1);
+    assert.equal(listBody.rooms[0].shareUrl, createBody.shareUrl);
+    assert.equal(closeResponse.status, 200);
+    assert.equal(closeBody.room.status, 'closed');
+  } finally {
+    await server.close();
+  }
+});
+
+test('访客分享链接可以查询聊天室基础信息', async () => {
+  const server = await createTestServer();
+
+  try {
+    const token = await login(server.baseUrl);
+    const createResponse = await fetch(`${server.baseUrl}/api/rooms`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const createBody = await createResponse.json();
+    const shareResponse = await fetch(`${server.baseUrl}/api/rooms/share/${createBody.room.shareSlug}`);
+    const shareBody = await shareResponse.json();
+
+    assert.equal(shareResponse.status, 200);
+    assert.equal(shareBody.room.id, createBody.room.id);
+    assert.equal(shareBody.room.shareSlug, createBody.room.shareSlug);
   } finally {
     await server.close();
   }

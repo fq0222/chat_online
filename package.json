@@ -5,6 +5,9 @@
   "type": "commonjs",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "web:dev": "npm --prefix apps/web run dev",
+    "web:build": "npm --prefix apps/web run build",
+    "web:check": "npm --prefix apps/web run check",
     "migrate": "tsx src/db/migrate.ts",
     "test": "node --test --import tsx \"test/*.test.ts\"",
     "check": "tsc --noEmit",

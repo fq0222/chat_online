@@ -42,6 +42,46 @@ export class PostgresRoomRepository implements RoomRepository {
     return result.rows[0] ? this.mapRow(result.rows[0]) : null;
   }
 
+  /**
+   * 按管理员 ID 查询房间列表。
+   * @param adminId 管理员 ID。
+   * @returns 该管理员创建的房间；核心分支按创建时间倒序返回，未命中时返回空数组。
+   */
+  async findByAdminId(adminId: string): Promise<RoomRecord[]> {
+    const result = await this.pool.query<RoomRow>(
+      'SELECT * FROM rooms WHERE admin_id = $1 ORDER BY created_at DESC',
+      [adminId]
+    );
+    return result.rows.map((row) => this.mapRow(row));
+  }
+
+  /**
+   * 按访客分享标识查询房间。
+   * @param shareSlug 分享链接中的唯一标识。
+   * @returns 命中的房间记录；未命中时返回 null。
+   */
+  async findByShareSlug(shareSlug: string): Promise<RoomRecord | null> {
+    const result = await this.pool.query<RoomRow>('SELECT * FROM rooms WHERE share_slug = $1 LIMIT 1', [shareSlug]);
+    return result.rows[0] ? this.mapRow(result.rows[0]) : null;
+  }
+
+  /**
+   * 更新管理员自己房间的状态。
+   * @param id 房间 ID。
+   * @param adminId 管理员 ID，用于限制只能修改自己的房间。
+   * @param status 目标状态；核心分支为房间不存在或不属于管理员时返回 null。
+   */
+  async updateStatus(id: string, adminId: string, status: 'active' | 'closed'): Promise<RoomRecord | null> {
+    const result = await this.pool.query<RoomRow>(
+      `UPDATE rooms
+       SET status = $3, updated_at = NOW()
+       WHERE id = $1 AND admin_id = $2
+       RETURNING *`,
+      [id, adminId, status]
+    );
+    return result.rows[0] ? this.mapRow(result.rows[0]) : null;
+  }
+
   private mapRow(row: RoomRow): RoomRecord {
     return {
       id: row.id,

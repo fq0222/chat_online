@@ -14,6 +14,26 @@ class MemoryRoomRepository implements RoomRepository {
   async findById(id: string): Promise<RoomRecord | null> {
     return this.rooms.find((room) => room.id === id) ?? null;
   }
+
+  async findByAdminId(adminId: string): Promise<RoomRecord[]> {
+    return this.rooms.filter((room) => room.adminId === adminId);
+  }
+
+  async findByShareSlug(shareSlug: string): Promise<RoomRecord | null> {
+    return this.rooms.find((room) => room.shareSlug === shareSlug) ?? null;
+  }
+
+  async updateStatus(id: string, adminId: string, status: 'active' | 'closed'): Promise<RoomRecord | null> {
+    const room = this.rooms.find((item) => item.id === id && item.adminId === adminId);
+
+    if (!room) {
+      return null;
+    }
+
+    room.status = status;
+    room.updatedAt = new Date();
+    return room;
+  }
 }
 
 test('管理员创建房间时写入仓储并生成分享链接', async () => {
@@ -36,4 +56,26 @@ test('查询房间基础信息不包含聊天记录字段', async () => {
   assert.equal(roomInfo?.id, created.room.id);
   assert.equal(Object.hasOwn(roomInfo ?? {}, 'messages'), false);
   assert.equal(Object.hasOwn(roomInfo ?? {}, 'chatRecords'), false);
+});
+
+test('管理员可以列出房间并关闭自己的房间', async () => {
+  const service = new RoomService(new MemoryRoomRepository(), { protocol: 'https', host: 'example.com' });
+  const created = await service.createRoom('admin-1');
+
+  const rooms = await service.listAdminRooms('admin-1');
+  const closed = await service.closeRoom(created.room.id, 'admin-1');
+
+  assert.equal(rooms.length, 1);
+  assert.equal(rooms[0].shareUrl, created.shareUrl);
+  assert.equal(closed?.status, 'closed');
+});
+
+test('访客可以通过分享标识查询启用中的聊天室', async () => {
+  const service = new RoomService(new MemoryRoomRepository(), { protocol: 'https', host: 'example.com' });
+  const created = await service.createRoom('admin-1');
+
+  const roomInfo = await service.getRoomByShareSlug(created.room.shareSlug);
+
+  assert.equal(roomInfo?.id, created.room.id);
+  assert.equal(roomInfo?.shareSlug, created.room.shareSlug);
 });

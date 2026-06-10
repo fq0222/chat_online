@@ -15,11 +15,15 @@ export type RoomInfo = {
   shareSlug: string;
   status: 'active' | 'closed';
   createdAt: string;
+  shareUrl?: string;
 };
 
 export type RoomRepository = {
   createRoom: (data: { id: string; adminId: string; shareSlug: string; status: 'active' }) => Promise<RoomRecord>;
   findById: (id: string) => Promise<RoomRecord | null>;
+  findByAdminId: (adminId: string) => Promise<RoomRecord[]>;
+  findByShareSlug: (shareSlug: string) => Promise<RoomRecord | null>;
+  updateStatus: (id: string, adminId: string, status: 'active' | 'closed') => Promise<RoomRecord | null>;
 };
 
 export type SiteConfig = {
@@ -76,6 +80,55 @@ export class RoomService {
       shareSlug: room.shareSlug,
       status: room.status,
       createdAt: room.createdAt.toISOString()
+    };
+  }
+
+  /**
+   * 列出管理员创建的聊天室。
+   * @param adminId 管理员 ID。
+   * @returns 按仓储顺序返回房间基础信息和访客分享链接；核心分支为空列表时返回空数组。
+   */
+  async listAdminRooms(adminId: string): Promise<RoomInfo[]> {
+    const rooms = await this.repository.findByAdminId(adminId);
+
+    return rooms.map((room) => this.toRoomInfo(room, true));
+  }
+
+  /**
+   * 关闭管理员自己的聊天室。
+   * @param roomId 房间 ID。
+   * @param adminId 管理员 ID。
+   * @returns 关闭后的房间信息；房间不存在或不属于该管理员时返回 null。
+   */
+  async closeRoom(roomId: string, adminId: string): Promise<RoomInfo | null> {
+    const room = await this.repository.updateStatus(roomId, adminId, 'closed');
+
+    return room ? this.toRoomInfo(room, true) : null;
+  }
+
+  /**
+   * 按访客分享标识查询聊天室。
+   * @param shareSlug 访客链接中的分享标识。
+   * @returns 启用中的房间信息；房间不存在或已关闭时返回 null。
+   */
+  async getRoomByShareSlug(shareSlug: string): Promise<RoomInfo | null> {
+    const room = await this.repository.findByShareSlug(shareSlug);
+
+    if (!room || room.status !== 'active') {
+      return null;
+    }
+
+    return this.toRoomInfo(room, true);
+  }
+
+  private toRoomInfo(room: RoomRecord, includeShareUrl = false): RoomInfo {
+    return {
+      id: room.id,
+      adminId: room.adminId,
+      shareSlug: room.shareSlug,
+      status: room.status,
+      createdAt: room.createdAt.toISOString(),
+      ...(includeShareUrl ? { shareUrl: this.buildShareUrl(room.shareSlug) } : {})
     };
   }
 
