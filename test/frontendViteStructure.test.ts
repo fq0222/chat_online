@@ -142,6 +142,11 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /removePendingImage/);
   assert.match(frontEndSource, /canSendMessage/);
   assert.match(frontEndSource, /selectedGuestId/);
+  assert.match(frontEndSource, /soundReminderEnabled/);
+  assert.match(frontEndSource, /toggleSoundReminder/);
+  assert.match(frontEndSource, /shouldPlayIncomingMessageSound/);
+  assert.match(frontEndSource, /playIncomingMessageSound/);
+  assert.match(frontEndSource, /type="checkbox"[\s\S]*声音提醒/);
   assert.match(frontEndSource, /composer-action-stack/);
   assert.match(stylesCss, /\.composer\s*{[^}]*display:\s*grid/s);
   assert.match(stylesCss, /\.message-form\s*{[^}]*height:\s*100%/s);

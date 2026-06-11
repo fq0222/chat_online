@@ -17,6 +17,7 @@ const {
   copiedRoomId,
   messageInput,
   connectionStatus,
+  soundReminderEnabled,
   activeGuestId,
   pendingImages,
   previewImage,
@@ -33,6 +34,7 @@ const {
   setImageInputElement,
   getRoomUserName,
   getRoomUserAvatar,
+  toggleSoundReminder,
   selectRoomUser,
   submitLogin,
   submitSetup,
@@ -116,6 +118,7 @@ const {
     :active-room="activeRoom"
     :copied-room-id="copiedRoomId"
     :connection-status="connectionStatus"
+    :sound-reminder-enabled="soundReminderEnabled"
     :room-user-list="roomUserList"
     :active-guest-id="activeGuestId"
     :active-room-user="activeRoomUser"
@@ -127,6 +130,7 @@ const {
     :set-image-input-element="setImageInputElement"
     :get-room-user-avatar="getRoomUserAvatar"
     :get-room-user-name="getRoomUserName"
+    @toggle-sound-reminder="toggleSoundReminder"
     @copy-share-url="copyShareUrl"
     @select-room-user="selectRoomUser"
     @open-image-preview="openImagePreview"
@@ -141,11 +145,13 @@ const {
     v-else
     v-model:message-input="messageInput"
     :connection-status="connectionStatus"
+    :sound-reminder-enabled="soundReminderEnabled"
     :chat-messages="activeConversationMessages"
     :pending-images="pendingImages"
     :can-send-message="canSendMessage"
     :set-message-timeline-element="setMessageTimelineElement"
     :set-image-input-element="setImageInputElement"
+    @toggle-sound-reminder="toggleSoundReminder"
     @open-image-preview="openImagePreview"
     @remove-pending-image="removePendingImage"
     @open-image-picker="openImagePicker"

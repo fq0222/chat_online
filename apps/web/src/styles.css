@@ -889,6 +889,38 @@ textarea:focus {
   font-size: 12px;
 }
 
+.chat-header-actions,
+.guest-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chat-header .chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sound-reminder-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  gap: 8px;
+  color: #374151;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.sound-reminder-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
 .message-timeline {
   min-height: 0;
   overflow: auto;
@@ -1191,7 +1223,7 @@ textarea:focus {
   gap: 12px;
 }
 
-.guest-header > span {
+.guest-header-actions > span {
   color: var(--muted);
   font-size: 13px;
   font-weight: 800;

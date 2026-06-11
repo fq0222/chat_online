@@ -2,6 +2,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import { createDraftSendQueue } from '../utils/chatDraftOrder';
 import { getPageTitle } from '../utils/pageTitle';
+import { isPageActive, playIncomingMessageSound, shouldPlayIncomingMessageSound } from '../utils/messageSound';
 import { createReconnectPolicy } from '../utils/websocketReconnect';
 import type {
   AdminInfo,
@@ -25,7 +26,8 @@ import type {
 export function useChatOnlineApp() {
   const storageKeys = {
     token: 'chatOnline.adminToken',
-    admin: 'chatOnline.admin'
+    admin: 'chatOnline.admin',
+    soundReminder: 'chatOnline.soundReminderEnabled'
   };
   const supportedImageMimeTypes = ['image/png', 'image/jpeg', 'image/webp'];
   const maxImageBytes = 1024 * 1024 * 5;
@@ -44,6 +46,7 @@ export function useChatOnlineApp() {
   const copiedRoomId = ref('');
   const messageInput = ref('');
   const connectionStatus = ref('等待连接');
+  const soundReminderEnabled = ref(localStorage.getItem(storageKeys.soundReminder) !== 'off');
   const activeGuestId = ref('');
   const socketRef = ref<WebSocket | null>(null);
   const reconnectPolicy = createReconnectPolicy({ maxAttempts: 3, delayMs: 5000 });
@@ -340,6 +343,31 @@ export function useChatOnlineApp() {
       item.connectionId === user.connectionId ? { ...item, unreadCount: 0, firstUnreadIndex: null } : item
     );
     scrollToFirstUnreadMessage();
+  }
+
+  /**
+   * 切换新消息声音提醒开关。
+   * 核心分支：开启和关闭都会写入本地存储，让管理员端和访客端刷新后延续用户选择。
+   */
+  function toggleSoundReminder(): void {
+    soundReminderEnabled.value = !soundReminderEnabled.value;
+    localStorage.setItem(storageKeys.soundReminder, soundReminderEnabled.value ? 'on' : 'off');
+  }
+
+  /**
+   * 根据页面聚焦和会话匹配状态播放新消息提示音。
+   * @param activeConversation 新消息是否属于当前正在查看的会话；核心分支用于管理员区分左侧选中的访客。
+   */
+  function notifyIncomingMessage(activeConversation: boolean): void {
+    if (!shouldPlayIncomingMessageSound({
+      soundReminderEnabled: soundReminderEnabled.value,
+      pageIsActive: isPageActive(),
+      activeConversation
+    })) {
+      return;
+    }
+
+    playIncomingMessageSound();
   }
 
   /**
@@ -1050,6 +1078,7 @@ export function useChatOnlineApp() {
       }
 
       const sentAt = data.sentAt ? new Date(data.sentAt) : new Date();
+      notifyIncomingMessage(activeGuestId.value === data.from.connectionId);
       appendAdminConversationMessage(data.from, {
         from: 'guest',
         text: data.payload?.text ?? '[图片消息]',
@@ -1113,6 +1142,7 @@ export function useChatOnlineApp() {
         imageUrl: data.type === 'image' ? data.payload?.dataUrl : undefined,
         mimeType: data.type === 'image' ? data.payload?.mimeType : undefined
       });
+      notifyIncomingMessage(true);
       scrollToLatestReadMessage();
     });
     socket.addEventListener('close', () => {
@@ -1181,6 +1211,7 @@ export function useChatOnlineApp() {
     copiedRoomId,
     messageInput,
     connectionStatus,
+    soundReminderEnabled,
     activeGuestId,
     pendingImages,
     previewImage,
@@ -1198,6 +1229,7 @@ export function useChatOnlineApp() {
     setImageInputElement,
     getRoomUserName,
     getRoomUserAvatar,
+    toggleSoundReminder,
     selectRoomUser,
     submitLogin,
     submitSetup,

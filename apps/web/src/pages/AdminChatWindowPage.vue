@@ -11,6 +11,7 @@ defineProps<{
   activeRoom: RoomInfo | null;
   copiedRoomId: string;
   connectionStatus: string;
+  soundReminderEnabled: boolean;
   roomUserList: RoomUser[];
   activeGuestId: string;
   activeRoomUser: RoomUser | null;
@@ -26,6 +27,7 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
+  (event: 'toggle-sound-reminder'): void;
   (event: 'copy-share-url', room: RoomInfo): void;
   (event: 'select-room-user', user: RoomUser): void;
   (event: 'open-image-preview', message: ChatMessage): void;
@@ -106,7 +108,13 @@ function updateMessageInput(event: Event): void {
             <strong>{{ activeRoomUser ? getRoomUserName(activeRoomUser) : '在线客服工作台' }}</strong>
             <span>{{ activeRoomUser ? '当前会话已读' : connectionStatus }}</span>
           </div>
-          <a class="ghost-button" href="/admin/settings">设置</a>
+          <div class="chat-header-actions">
+            <label class="sound-reminder-toggle">
+              <input type="checkbox" :checked="soundReminderEnabled" @change="emit('toggle-sound-reminder')" />
+              <span>声音提醒</span>
+            </label>
+            <a class="ghost-button" href="/admin/settings">设置</a>
+          </div>
         </header>
         <div :ref="setMessageTimelineElement" class="message-timeline" aria-live="polite">
           <div

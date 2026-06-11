@@ -8,6 +8,7 @@ import type { ChatMessage, PendingImage } from '../types';
  */
 defineProps<{
   connectionStatus: string;
+  soundReminderEnabled: boolean;
   chatMessages: ChatMessage[];
   pendingImages: PendingImage[];
   messageInput: string;
@@ -17,6 +18,7 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
+  (event: 'toggle-sound-reminder'): void;
   (event: 'open-image-preview', message: ChatMessage): void;
   (event: 'remove-pending-image', index: number): void;
   (event: 'open-image-picker'): void;
@@ -48,7 +50,13 @@ function updateMessageInput(event: Event): void {
           <strong>在线客服</strong>
         </div>
         <p class="guest-refresh-warning">请勿刷新网页，刷新后聊天记录会被清空，服务器不保存。</p>
-        <span>{{ connectionStatus }}</span>
+        <div class="guest-header-actions">
+          <label class="sound-reminder-toggle">
+            <input type="checkbox" :checked="soundReminderEnabled" @change="emit('toggle-sound-reminder')" />
+            <span>声音提醒</span>
+          </label>
+          <span>{{ connectionStatus }}</span>
+        </div>
       </header>
       <div :ref="setMessageTimelineElement" class="message-timeline guest-timeline" aria-live="polite">
         <div v-for="(message, index) in chatMessages" :key="`${message.time}-${index}`" class="message-row" :class="message.from">
