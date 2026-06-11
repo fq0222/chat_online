@@ -356,7 +356,7 @@ textarea:focus {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: 190px 190px 1fr;
+  grid-template-columns: 190px 190px minmax(360px, 1fr);
   gap: 16px;
   align-items: stretch;
   margin: 28px 0 18px;
@@ -387,9 +387,24 @@ textarea:focus {
   font-size: 32px;
 }
 
-.create-action {
+.create-room-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 12px;
+  align-items: end;
   justify-self: end;
-  align-self: center;
+  width: min(520px, 100%);
+}
+
+.create-room-form label {
+  display: grid;
+  gap: 8px;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.create-action {
   min-width: 150px;
 }
 
@@ -408,7 +423,7 @@ textarea:focus {
 
 .room-row {
   display: grid;
-  grid-template-columns: 120px 100px 190px minmax(260px, 1fr) 170px;
+  grid-template-columns: 170px 100px 190px minmax(260px, 1fr) 170px;
   gap: 12px;
   align-items: center;
   min-height: 58px;
@@ -430,8 +445,24 @@ textarea:focus {
 }
 
 .room-name {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
   color: var(--primary);
   font-weight: 900;
+}
+
+.room-name strong,
+.room-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-name small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .room-row code {
@@ -568,6 +599,25 @@ textarea:focus {
   gap: 12px;
 }
 
+.room-code-main {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.room-code-main strong,
+.room-code-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-code-main small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .copy-room-button {
   min-height: 34px;
   border: 1px solid rgba(37, 99, 235, 0.18);
@@ -688,11 +738,18 @@ textarea:focus {
 .workspace-brand div {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .workspace-brand span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.room-title-remark {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .search-box {

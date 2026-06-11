@@ -58,14 +58,17 @@ function updateMessageInput(event: Event): void {
         <div class="workspace-brand">
           <span class="brand-mark small">CO</span>
           <div>
-            <strong>房间 {{ activeRoomId ? activeRoomId.slice(0, 8) : '未选择' }}</strong>
+            <strong class="room-title-remark">房间 {{ activeRoom?.remarkName || (activeRoomId ? activeRoomId.slice(0, 8) : '未选择') }}</strong>
             <span>{{ connectionStatus }}</span>
           </div>
         </div>
         <div class="side-room-card">
           <span>当前房间</span>
           <div class="room-code-row">
-            <strong>{{ activeRoomId ? activeRoomId.slice(0, 8) : '未选择' }}</strong>
+            <span class="room-code-main">
+              <strong>{{ activeRoom?.remarkName || (activeRoomId ? activeRoomId.slice(0, 8) : '未选择') }}</strong>
+              <small v-if="activeRoomId">{{ activeRoomId.slice(0, 8) }}</small>
+            </span>
             <button v-if="activeRoom" class="copy-room-button" type="button" @click="emit('copy-share-url', activeRoom)">
               {{ copiedRoomId === activeRoom.id ? '已复制' : '复制链接' }}
             </button>

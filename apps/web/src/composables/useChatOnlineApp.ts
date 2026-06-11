@@ -34,6 +34,7 @@ export function useChatOnlineApp() {
   const loginForm = reactive({ username: '', password: '' });
   const setupForm = reactive({ username: '', password: '' });
   const settingsForm = reactive({ username: '', password: '' });
+  const roomForm = reactive({ remarkName: '' });
   const status = reactive({ message: '', type: 'plain' as StatusType });
   const showSetup = ref(false);
   const bootstrapToken = ref('');
@@ -818,9 +819,13 @@ export function useChatOnlineApp() {
     try {
       const result = await requestJson<RoomResult>('/api/rooms', {
         method: 'POST',
-        headers: authHeaders()
+        headers: authHeaders(),
+        body: JSON.stringify({
+          remarkName: roomForm.remarkName
+        })
       });
       rooms.value = [{ ...result.room, shareUrl: result.shareUrl }, ...rooms.value];
+      roomForm.remarkName = '';
       setStatus('聊天室创建成功。', 'success');
     } catch (error) {
       setStatus((error as Error).message, 'error');
@@ -828,21 +833,21 @@ export function useChatOnlineApp() {
   }
 
   /**
-   * 关闭聊天室。
+   * 删除聊天室。
    * @param roomId 房间 ID。
-   * 核心分支：用户确认后调用删除接口，后端会把状态改为 closed。
+   * 核心分支：用户确认后调用删除接口，后端会真实删除数据，前端从列表移除对应房间。
    */
   async function deleteRoom(roomId: string): Promise<void> {
-    if (!window.confirm('确认删除这个聊天室吗？删除后房间会被关闭。')) {
+    if (!window.confirm('确认删除这个聊天室吗？删除后数据会直接移除。')) {
       return;
     }
 
     try {
-      const result = await requestJson<{ room: RoomInfo }>(`/api/rooms/${roomId}`, {
+      await requestJson<{ room: RoomInfo }>(`/api/rooms/${roomId}`, {
         method: 'DELETE',
         headers: authHeaders()
       });
-      rooms.value = rooms.value.map((room) => (room.id === roomId ? { ...room, ...result.room } : room));
+      rooms.value = rooms.value.filter((room) => room.id !== roomId);
       setStatus('聊天室已删除。', 'success');
     } catch (error) {
       setStatus((error as Error).message, 'error');
@@ -1167,6 +1172,7 @@ export function useChatOnlineApp() {
     loginForm,
     setupForm,
     settingsForm,
+    roomForm,
     status,
     showSetup,
     rooms,

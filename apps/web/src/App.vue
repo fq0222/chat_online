@@ -9,6 +9,7 @@ const {
   loginForm,
   setupForm,
   settingsForm,
+  roomForm,
   status,
   showSetup,
   rooms,
@@ -64,6 +65,7 @@ const {
   <RoomManagerPage
     v-else-if="page === 'rooms'"
     :rooms="rooms"
+    :room-form="roomForm"
     :loading-rooms="loadingRooms"
     :copied-room-id="copiedRoomId"
     :active-rooms-count="activeRoomsCount"

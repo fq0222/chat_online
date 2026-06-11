@@ -46,7 +46,8 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
       return;
     }
 
-    const result = await roomService.createRoom(session.adminId);
+    const remarkName = typeof request.body?.remarkName === 'string' ? request.body.remarkName : '';
+    const result = await roomService.createRoom(session.adminId, remarkName);
     logger.info(`聊天室创建成功：${result.room.id}`);
 
     response.status(201).json({
@@ -54,6 +55,7 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
         id: result.room.id,
         adminId: result.room.adminId,
         shareSlug: result.room.shareSlug,
+        remarkName: result.room.remarkName,
         status: result.room.status,
         createdAt: result.room.createdAt.toISOString()
       },
@@ -80,14 +82,14 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
       return;
     }
 
-    const room = await roomService.closeRoom(request.params.roomId, session.adminId);
+    const room = await roomService.deleteRoom(request.params.roomId, session.adminId);
 
     if (!room) {
       response.status(404).json({ message: '聊天室不存在' });
       return;
     }
 
-    logger.info(`聊天室已关闭：${room.id}`);
+    logger.info(`聊天室已删除：${room.id}`);
     response.json({ room });
   });
 

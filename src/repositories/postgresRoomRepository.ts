@@ -5,6 +5,7 @@ type RoomRow = {
   id: string;
   admin_id: string;
   share_slug: string;
+  remark_name: string;
   status: 'active' | 'closed';
   created_at: Date;
   updated_at: Date;
@@ -12,22 +13,22 @@ type RoomRow = {
 
 /**
  * PostgreSQL 房间仓储。
- * 职责：读写 rooms 表；关键参数为 pg 连接池；核心分支为创建房间和查无房间。
+ * 职责：读写 rooms 表；关键参数为 pg 连接池；核心分支为创建房间、查询命中、无权限删除或未命中。
  */
 export class PostgresRoomRepository implements RoomRepository {
   constructor(private readonly pool: Pool) {}
 
   /**
    * 创建房间元数据。
-   * @param data 房间 ID、管理员 ID、分享标识和状态。
+   * @param data 房间 ID、管理员 ID、分享标识、备注名称和状态。
    * @returns 创建后的房间记录。
    */
-  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active' }): Promise<RoomRecord> {
+  async createRoom(data: { id: string; adminId: string; shareSlug: string; remarkName: string; status: 'active' }): Promise<RoomRecord> {
     const result = await this.pool.query<RoomRow>(
-      `INSERT INTO rooms (id, admin_id, share_slug, status)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO rooms (id, admin_id, share_slug, remark_name, status)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [data.id, data.adminId, data.shareSlug, data.status]
+      [data.id, data.adminId, data.shareSlug, data.remarkName, data.status]
     );
     return this.mapRow(result.rows[0]);
   }
@@ -82,11 +83,28 @@ export class PostgresRoomRepository implements RoomRepository {
     return result.rows[0] ? this.mapRow(result.rows[0]) : null;
   }
 
+  /**
+   * 真实删除管理员自己的房间。
+   * @param id 房间 ID。
+   * @param adminId 管理员 ID，用于限制只能删除自己的房间。
+   * @returns 被删除的房间记录；核心分支为房间不存在或不属于管理员时返回 null。
+   */
+  async deleteRoom(id: string, adminId: string): Promise<RoomRecord | null> {
+    const result = await this.pool.query<RoomRow>(
+      `DELETE FROM rooms
+       WHERE id = $1 AND admin_id = $2
+       RETURNING *`,
+      [id, adminId]
+    );
+    return result.rows[0] ? this.mapRow(result.rows[0]) : null;
+  }
+
   private mapRow(row: RoomRow): RoomRecord {
     return {
       id: row.id,
       adminId: row.admin_id,
       shareSlug: row.share_slug,
+      remarkName: row.remark_name,
       status: row.status,
       createdAt: row.created_at,
       updatedAt: row.updated_at

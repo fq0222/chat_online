@@ -42,8 +42,8 @@ class MemoryAdminRepository implements AdminRepository {
 class MemoryRoomRepository implements RoomRepository {
   private rooms: RoomRecord[] = [];
 
-  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active' }): Promise<RoomRecord> {
-    const room = { ...data, createdAt: new Date(), updatedAt: new Date() };
+  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active'; remarkName?: string }): Promise<RoomRecord> {
+    const room = { ...data, remarkName: data.remarkName ?? '', createdAt: new Date(), updatedAt: new Date() };
     this.rooms.push(room);
     return room;
   }
@@ -69,6 +69,17 @@ class MemoryRoomRepository implements RoomRepository {
 
     room.status = status;
     room.updatedAt = new Date();
+    return room;
+  }
+
+  async deleteRoom(id: string, adminId: string): Promise<RoomRecord | null> {
+    const roomIndex = this.rooms.findIndex((item) => item.id === id && item.adminId === adminId);
+
+    if (roomIndex === -1) {
+      return null;
+    }
+
+    const [room] = this.rooms.splice(roomIndex, 1);
     return room;
   }
 }
@@ -116,54 +127,66 @@ test('未登录不能创建房间', async () => {
   }
 });
 
-test('管理员可以创建房间并查询基础信息', async () => {
+test('管理员可以创建带备注的房间并查询基础信息', async () => {
   const server = await createTestServer();
 
   try {
     const token = await login(server.baseUrl);
     const createResponse = await fetch(`${server.baseUrl}/api/rooms`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${token}` }
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ remarkName: '售前咨询' })
     });
     const createBody = await createResponse.json();
     const getResponse = await fetch(`${server.baseUrl}/api/rooms/${createBody.room.id}`);
     const getBody = await getResponse.json();
 
     assert.equal(createResponse.status, 201);
+    assert.equal(createBody.room.remarkName, '售前咨询');
     assert.match(createBody.shareUrl, /^https:\/\/example\.com\/chat\//);
     assert.equal(getResponse.status, 200);
     assert.equal(getBody.room.id, createBody.room.id);
+    assert.equal(getBody.room.remarkName, '售前咨询');
     assert.equal(Object.hasOwn(getBody.room, 'messages'), false);
   } finally {
     await server.close();
   }
 });
 
-test('管理员可以列出自己的房间并关闭房间', async () => {
+test('管理员可以列出自己的房间并真实删除房间', async () => {
   const server = await createTestServer();
 
   try {
     const token = await login(server.baseUrl);
     const createResponse = await fetch(`${server.baseUrl}/api/rooms`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${token}` }
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ remarkName: '订单售后' })
     });
     const createBody = await createResponse.json();
     const listResponse = await fetch(`${server.baseUrl}/api/rooms`, {
       headers: { authorization: `Bearer ${token}` }
     });
     const listBody = await listResponse.json();
-    const closeResponse = await fetch(`${server.baseUrl}/api/rooms/${createBody.room.id}`, {
+    const deleteResponse = await fetch(`${server.baseUrl}/api/rooms/${createBody.room.id}`, {
       method: 'DELETE',
       headers: { authorization: `Bearer ${token}` }
     });
-    const closeBody = await closeResponse.json();
+    const deleteBody = await deleteResponse.json();
+    const listAfterDeleteResponse = await fetch(`${server.baseUrl}/api/rooms`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const listAfterDeleteBody = await listAfterDeleteResponse.json();
+    const getAfterDeleteResponse = await fetch(`${server.baseUrl}/api/rooms/${createBody.room.id}`);
 
     assert.equal(listResponse.status, 200);
     assert.equal(listBody.rooms.length, 1);
+    assert.equal(listBody.rooms[0].remarkName, '订单售后');
     assert.equal(listBody.rooms[0].shareUrl, createBody.shareUrl);
-    assert.equal(closeResponse.status, 200);
-    assert.equal(closeBody.room.status, 'closed');
+    assert.equal(deleteResponse.status, 200);
+    assert.equal(deleteBody.room.id, createBody.room.id);
+    assert.equal(listAfterDeleteBody.rooms.length, 0);
+    assert.equal(getAfterDeleteResponse.status, 404);
   } finally {
     await server.close();
   }

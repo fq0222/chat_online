@@ -5,8 +5,8 @@ import { RoomService, type RoomRecord, type RoomRepository } from '../src/servic
 class MemoryRoomRepository implements RoomRepository {
   readonly rooms: RoomRecord[] = [];
 
-  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active' }): Promise<RoomRecord> {
-    const room = { ...data, createdAt: new Date(), updatedAt: new Date() };
+  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active'; remarkName?: string }): Promise<RoomRecord> {
+    const room = { ...data, remarkName: data.remarkName ?? '', createdAt: new Date(), updatedAt: new Date() };
     this.rooms.push(room);
     return room;
   }
@@ -34,16 +34,28 @@ class MemoryRoomRepository implements RoomRepository {
     room.updatedAt = new Date();
     return room;
   }
+
+  async deleteRoom(id: string, adminId: string): Promise<RoomRecord | null> {
+    const roomIndex = this.rooms.findIndex((item) => item.id === id && item.adminId === adminId);
+
+    if (roomIndex === -1) {
+      return null;
+    }
+
+    const [room] = this.rooms.splice(roomIndex, 1);
+    return room;
+  }
 }
 
-test('管理员创建房间时写入仓储并生成分享链接', async () => {
+test('管理员创建房间时写入备注名称并生成分享链接', async () => {
   const repository = new MemoryRoomRepository();
   const service = new RoomService(repository, { protocol: 'https', host: 'example.com' });
 
-  const result = await service.createRoom('admin-1');
+  const result = await service.createRoom('admin-1', '售前咨询');
 
   assert.equal(repository.rooms.length, 1);
   assert.equal(result.room.adminId, 'admin-1');
+  assert.equal(result.room.remarkName, '售前咨询');
   assert.match(result.shareUrl, /^https:\/\/example\.com\/chat\//);
 });
 
@@ -58,16 +70,19 @@ test('查询房间基础信息不包含聊天记录字段', async () => {
   assert.equal(Object.hasOwn(roomInfo ?? {}, 'chatRecords'), false);
 });
 
-test('管理员可以列出房间并关闭自己的房间', async () => {
+test('管理员可以列出房间并真实删除自己的房间', async () => {
   const service = new RoomService(new MemoryRoomRepository(), { protocol: 'https', host: 'example.com' });
-  const created = await service.createRoom('admin-1');
+  const created = await service.createRoom('admin-1', '订单售后');
 
   const rooms = await service.listAdminRooms('admin-1');
-  const closed = await service.closeRoom(created.room.id, 'admin-1');
+  const deleted = await service.deleteRoom(created.room.id, 'admin-1');
+  const roomsAfterDelete = await service.listAdminRooms('admin-1');
 
   assert.equal(rooms.length, 1);
+  assert.equal(rooms[0].remarkName, '订单售后');
   assert.equal(rooms[0].shareUrl, created.shareUrl);
-  assert.equal(closed?.status, 'closed');
+  assert.equal(deleted?.id, created.room.id);
+  assert.equal(roomsAfterDelete.length, 0);
 });
 
 test('访客可以通过分享标识查询启用中的聊天室', async () => {
