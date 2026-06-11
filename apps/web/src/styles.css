@@ -928,6 +928,7 @@ textarea:focus {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
   padding: 11px 13px;
   line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .message-bubble.image {

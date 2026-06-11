@@ -149,6 +149,7 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(stylesCss, /\.composer-input-wrap\s*{[^}]*border:/s);
   assert.match(stylesCss, /\.composer-input-wrap textarea\s*{[^}]*border:\s*0/s);
   assert.match(stylesCss, /\.composer-input-wrap:has\(\.image-preview\) textarea/s);
+  assert.match(stylesCss, /\.message-bubble\s*{[^}]*white-space:\s*pre-wrap/s);
   assert.doesNotMatch(frontEndSource, /:disabled="!activeGuestId"/);
   assert.doesNotMatch(frontEndSource, /:disabled="!guestRoom"/);
   assert.match(frontEndSource, /登录已失效/);
