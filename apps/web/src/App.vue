@@ -18,6 +18,7 @@ const {
   messageInput,
   connectionStatus,
   soundReminderEnabled,
+  chatHistoryEnabled,
   activeGuestId,
   pendingImages,
   previewImage,
@@ -35,6 +36,7 @@ const {
   getRoomUserName,
   getRoomUserAvatar,
   toggleSoundReminder,
+  toggleChatHistoryStorage,
   selectRoomUser,
   submitLogin,
   submitSetup,
@@ -146,12 +148,14 @@ const {
     v-model:message-input="messageInput"
     :connection-status="connectionStatus"
     :sound-reminder-enabled="soundReminderEnabled"
+    :chat-history-enabled="chatHistoryEnabled"
     :chat-messages="activeConversationMessages"
     :pending-images="pendingImages"
     :can-send-message="canSendMessage"
     :set-message-timeline-element="setMessageTimelineElement"
     :set-image-input-element="setImageInputElement"
     @toggle-sound-reminder="toggleSoundReminder"
+    @toggle-chat-history-storage="toggleChatHistoryStorage"
     @open-image-preview="openImagePreview"
     @remove-pending-image="removePendingImage"
     @open-image-picker="openImagePicker"

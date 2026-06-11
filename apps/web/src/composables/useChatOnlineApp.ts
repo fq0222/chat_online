@@ -1,6 +1,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import { createDraftSendQueue } from '../utils/chatDraftOrder';
+import { createChatHistoryStorage } from '../utils/chatHistoryStorage';
 import { getPageTitle } from '../utils/pageTitle';
 import { isPageActive, playIncomingMessageSound, shouldPlayIncomingMessageSound } from '../utils/messageSound';
 import { createReconnectPolicy } from '../utils/websocketReconnect';
@@ -27,7 +28,9 @@ export function useChatOnlineApp() {
   const storageKeys = {
     token: 'chatOnline.adminToken',
     admin: 'chatOnline.admin',
-    soundReminder: 'chatOnline.soundReminderEnabled'
+    soundReminder: 'chatOnline.soundReminderEnabled',
+    guestChatHistoryEnabled: 'chatOnline.guestChatHistoryEnabled',
+    guestChatHistoryPrefix: 'chatOnline.guestChatHistory'
   };
   const supportedImageMimeTypes = ['image/png', 'image/jpeg', 'image/webp'];
   const maxImageBytes = 1024 * 1024 * 5;
@@ -47,6 +50,7 @@ export function useChatOnlineApp() {
   const messageInput = ref('');
   const connectionStatus = ref('等待连接');
   const soundReminderEnabled = ref(localStorage.getItem(storageKeys.soundReminder) !== 'off');
+  const chatHistoryEnabled = ref(localStorage.getItem(storageKeys.guestChatHistoryEnabled) === 'on');
   const activeGuestId = ref('');
   const socketRef = ref<WebSocket | null>(null);
   const reconnectPolicy = createReconnectPolicy({ maxAttempts: 3, delayMs: 5000 });
@@ -355,6 +359,68 @@ export function useChatOnlineApp() {
   }
 
   /**
+   * 生成访客聊天记录缓存键。
+   * @param roomId 房间 ID；核心分支为不同聊天室隔离记录，避免分享链接之间串消息。
+   * @returns 当前访客聊天室对应的 localStorage 键。
+   */
+  function getGuestChatHistoryKey(roomId: string): string {
+    return `${storageKeys.guestChatHistoryPrefix}.${roomId}`;
+  }
+
+  /**
+   * 创建当前访客聊天室的缓存读写器。
+   * @param roomId 房间 ID；核心分支为使用同一个开关键，但按房间保存聊天记录。
+   * @returns 访客聊天记录缓存读写器。
+   */
+  function createGuestChatHistoryStorage(roomId: string) {
+    return createChatHistoryStorage({
+      storage: localStorage,
+      enabledKey: storageKeys.guestChatHistoryEnabled,
+      historyKey: getGuestChatHistoryKey(roomId)
+    });
+  }
+
+  /**
+   * 从浏览器缓存恢复访客聊天记录。
+   * @param roomId 房间 ID；核心分支为开关开启时才读取，关闭时保持内存消息为空。
+   */
+  function loadGuestChatHistory(roomId: string): void {
+    if (!chatHistoryEnabled.value) {
+      return;
+    }
+
+    chatMessages.value = createGuestChatHistoryStorage(roomId).read();
+    scrollToLatestReadMessage();
+  }
+
+  /**
+   * 持久化当前访客聊天记录。
+   * @param roomId 房间 ID；核心分支为缺少房间或开关关闭时不写入浏览器缓存。
+   */
+  function persistGuestChatHistory(roomId: string): void {
+    if (!roomId) {
+      return;
+    }
+
+    createGuestChatHistoryStorage(roomId).write(chatMessages.value);
+  }
+
+  /**
+   * 切换访客聊天记录缓存开关。
+   * 核心分支：开启时立即把当前窗口已经存在的聊天记录写入浏览器缓存，满足后开关也补存旧记录。
+   */
+  function toggleChatHistoryStorage(): void {
+    chatHistoryEnabled.value = !chatHistoryEnabled.value;
+
+    const roomId = guestRoom.value?.id;
+    localStorage.setItem(storageKeys.guestChatHistoryEnabled, chatHistoryEnabled.value ? 'on' : 'off');
+
+    if (roomId) {
+      createGuestChatHistoryStorage(roomId).setEnabled(chatHistoryEnabled.value, chatMessages.value);
+    }
+  }
+
+  /**
    * 根据页面聚焦和会话匹配状态播放新消息提示音。
    * @param activeConversation 新消息是否属于当前正在查看的会话；核心分支用于管理员区分左侧选中的访客。
    */
@@ -592,6 +658,7 @@ export function useChatOnlineApp() {
           imageUrl: image.dataUrl,
           mimeType: image.mimeType
         });
+        persistGuestChatHistory(guestRoom.value?.id ?? '');
         scrollToLatestReadMessage();
 
         if (socketRef.value?.readyState === WebSocket.OPEN) {
@@ -991,6 +1058,7 @@ export function useChatOnlineApp() {
           text: task.text,
           time: formatMessageTime()
         });
+        persistGuestChatHistory(guestRoom.value?.id ?? '');
         scrollToLatestReadMessage();
 
         if (socketRef.value?.readyState === WebSocket.OPEN) {
@@ -1142,6 +1210,7 @@ export function useChatOnlineApp() {
         imageUrl: data.type === 'image' ? data.payload?.dataUrl : undefined,
         mimeType: data.type === 'image' ? data.payload?.mimeType : undefined
       });
+      persistGuestChatHistory(guestRoom.value?.id ?? roomId);
       notifyIncomingMessage(true);
       scrollToLatestReadMessage();
     });
@@ -1168,6 +1237,7 @@ export function useChatOnlineApp() {
       await loadGuestRoom();
 
       if (guestRoom.value) {
+        loadGuestChatHistory(guestRoom.value.id);
         connectGuestChatSocket(guestRoom.value.id);
       }
 
@@ -1212,6 +1282,7 @@ export function useChatOnlineApp() {
     messageInput,
     connectionStatus,
     soundReminderEnabled,
+    chatHistoryEnabled,
     activeGuestId,
     pendingImages,
     previewImage,
@@ -1230,6 +1301,7 @@ export function useChatOnlineApp() {
     getRoomUserName,
     getRoomUserAvatar,
     toggleSoundReminder,
+    toggleChatHistoryStorage,
     selectRoomUser,
     submitLogin,
     submitSetup,

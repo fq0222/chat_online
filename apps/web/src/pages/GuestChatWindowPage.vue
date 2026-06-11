@@ -9,6 +9,7 @@ import type { ChatMessage, PendingImage } from '../types';
 defineProps<{
   connectionStatus: string;
   soundReminderEnabled: boolean;
+  chatHistoryEnabled: boolean;
   chatMessages: ChatMessage[];
   pendingImages: PendingImage[];
   messageInput: string;
@@ -19,6 +20,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (event: 'toggle-sound-reminder'): void;
+  (event: 'toggle-chat-history-storage'): void;
   (event: 'open-image-preview', message: ChatMessage): void;
   (event: 'remove-pending-image', index: number): void;
   (event: 'open-image-picker'): void;
@@ -49,11 +51,17 @@ function updateMessageInput(event: Event): void {
           <span class="brand-mark small">CO</span>
           <strong>在线客服</strong>
         </div>
-        <p class="guest-refresh-warning">请勿刷新网页，刷新后聊天记录会被清空，服务器不保存。</p>
+        <p class="guest-refresh-warning">
+          {{ chatHistoryEnabled ? '已开启浏览器缓存保存，服务器仍不保存聊天记录。' : '请勿刷新网页，刷新后聊天记录会被清空，服务器不保存。' }}
+        </p>
         <div class="guest-header-actions">
           <label class="sound-reminder-toggle">
             <input type="checkbox" :checked="soundReminderEnabled" @change="emit('toggle-sound-reminder')" />
             <span>声音提醒</span>
+          </label>
+          <label class="chat-history-toggle">
+            <input type="checkbox" :checked="chatHistoryEnabled" @change="emit('toggle-chat-history-storage')" />
+            <span>保存记录</span>
           </label>
           <span>{{ connectionStatus }}</span>
         </div>
