@@ -8,6 +8,7 @@
 ### 本地配置
 
 复制 `config.example.js` 为 `config.js`，填写真实数据库连接和首次管理员账号密码。`config.js` 可能包含真实敏感信息，已加入 `.gitignore`，不要提交到远程仓库。
+生产环境必须把 `auth.jwtSecret` 改成长度至少 32 位的强随机密钥；PM2 使用 `NODE_ENV=production` 启动时，如果仍使用模板或开发密钥，服务会拒绝启动。
 
 ### 常用命令
 

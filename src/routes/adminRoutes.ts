@@ -28,15 +28,15 @@ export function createAdminRouter(adminService: AdminService, authService: AuthS
   const router = Router();
 
   router.post('/setup', async (request, response) => {
-    const session = authService.verifyToken(getBearerToken(request.headers.authorization));
-
-    if (!session?.isBootstrap) {
-      response.status(401).json({ message: '无效的首次登录 token' });
+    if (await adminService.hasAnyAdmin()) {
+      response.status(409).json({ message: '管理员已初始化' });
       return;
     }
 
-    if (await adminService.hasAnyAdmin()) {
-      response.status(409).json({ message: '管理员已初始化' });
+    const session = await authService.verifyToken(getBearerToken(request.headers.authorization));
+
+    if (!session?.isBootstrap) {
+      response.status(401).json({ message: '无效的首次登录 token' });
       return;
     }
 
@@ -57,7 +57,7 @@ export function createAdminRouter(adminService: AdminService, authService: AuthS
   });
 
   router.put('/profile', async (request, response) => {
-    const session = authService.verifyToken(getBearerToken(request.headers.authorization));
+    const session = await authService.verifyToken(getBearerToken(request.headers.authorization));
 
     if (!session || session.isBootstrap) {
       response.status(401).json({ message: '管理员未登录' });

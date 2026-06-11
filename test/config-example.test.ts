@@ -15,4 +15,6 @@ test('config.example.js 包含生产环境必需配置项', () => {
   assert.equal(typeof config.bootstrapAdmin.username, 'string');
   assert.equal(typeof config.bootstrapAdmin.password, 'string');
   assert.equal(config.auth.adminTokenTtlMs, 24 * 60 * 60 * 1000);
+  assert.equal(typeof config.auth.jwtSecret, 'string');
+  assert.equal(config.auth.jwtSecret.length >= 32, true);
 });

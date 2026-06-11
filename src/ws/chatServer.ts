@@ -1,7 +1,7 @@
 import type http from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { AuthService } from '../services/authService';
+import type { AuthService, AuthSession } from '../services/authService';
 import type { ChatRelayService, ClientMessage } from '../services/chatRelayService';
 import type { RoomService } from '../services/roomService';
 import { createLogger } from '../utils/logger';
@@ -47,7 +47,7 @@ export function attachChatServer(
       return;
     }
 
-    const session = dependencies.authService.verifyToken(token);
+    const session = await dependencies.authService.verifyToken(token);
 
     if (role === 'admin' && (!session || session.isBootstrap)) {
       socket.destroy();
@@ -55,16 +55,15 @@ export function attachChatServer(
     }
 
     wsServer.handleUpgrade(request, socket, head, (socketInstance) => {
-      wsServer.emit('connection', socketInstance, request, { roomId, role, token });
+      wsServer.emit('connection', socketInstance, request, { roomId, role, adminSession: role === 'admin' ? session : undefined });
     });
   });
 
-  wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: { roomId: string; role: string; token?: string }) => {
+  wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: { roomId: string; role: string; adminSession?: AuthSession }) => {
     const sender = { send: (message: string) => socket.send(message) };
-    const session = dependencies.authService.verifyToken(context.token);
     const connection =
-      context.role === 'admin' && session
-        ? dependencies.chatRelayService.connectAdmin(context.roomId, session.adminId, sender)
+      context.role === 'admin' && context.adminSession
+        ? dependencies.chatRelayService.connectAdmin(context.roomId, context.adminSession.adminId, sender)
         : dependencies.chatRelayService.connectGuest(context.roomId, sender);
 
     socket.on('message', (rawMessage) => {

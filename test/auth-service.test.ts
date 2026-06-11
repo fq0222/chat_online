@@ -19,7 +19,8 @@ class MemoryAdminRepository implements AdminRepository {
   }
 
   async createAdmin(username: string, passwordHash: string): Promise<AdminRecord> {
-    const admin = { id: `admin-${this.admins.length + 1}`, username, passwordHash, createdAt: new Date() };
+    const now = new Date();
+    const admin = { id: `admin-${this.admins.length + 1}`, username, passwordHash, createdAt: now, updatedAt: now };
     this.admins.push(admin);
     return admin;
   }
@@ -31,7 +32,7 @@ class MemoryAdminRepository implements AdminRepository {
       throw new Error('管理员不存在');
     }
 
-    Object.assign(admin, data);
+    Object.assign(admin, data, { updatedAt: new Date() });
     return admin;
   }
 }
@@ -50,7 +51,7 @@ test('数据库无管理员时允许使用配置中的首次管理员登录', as
   assert.equal(result.ok, true);
   assert.equal(result.requiresSetup, true);
   assert.equal(result.admin.username, 'root');
-  assert.equal(authService.verifyToken(result.token)?.isBootstrap, true);
+  assert.equal((await authService.verifyToken(result.token))?.isBootstrap, true);
 });
 
 test('数据库已有管理员时优先使用数据库账号登录', async () => {
@@ -63,7 +64,7 @@ test('数据库已有管理员时优先使用数据库账号登录', async () =>
   assert.equal(result.ok, true);
   assert.equal(result.requiresSetup, false);
   assert.equal(result.admin.id, admin.id);
-  assert.equal(authService.verifyToken(result.token)?.adminId, admin.id);
+  assert.equal((await authService.verifyToken(result.token))?.adminId, admin.id);
 });
 
 test('错误密码不能登录', async () => {
@@ -82,7 +83,7 @@ test('撤销管理员 token 后校验失败', async () => {
 
   authService.revokeAdminTokens(admin.id);
 
-  assert.equal(authService.verifyToken(result.token), null);
+  assert.equal(await authService.verifyToken(result.token), null);
 });
 
 test('管理员 token 超过配置有效时间后校验失败', async () => {
@@ -96,8 +97,38 @@ test('管理员 token 超过配置有效时间后校验失败', async () => {
   const result = await authService.login('owner', 'secret123');
 
   nowMs += 999;
-  assert.equal(authService.verifyToken(result.token)?.adminId, admin.id);
+  assert.equal((await authService.verifyToken(result.token))?.adminId, admin.id);
 
   nowMs += 2;
-  assert.equal(authService.verifyToken(result.token), null);
+  assert.equal(await authService.verifyToken(result.token), null);
+});
+
+test('JWT token 在服务重启后仍可校验', async () => {
+  const repository = new MemoryAdminRepository();
+  const adminService = new AdminService(repository);
+  const admin = await adminService.createAdmin('owner', 'secret123');
+  const options = {
+    jwtSecret: 'test-jwt-secret-with-at-least-32-characters',
+    adminTokenTtlMs: 24 * 60 * 60 * 1000
+  };
+  const firstAuthService = new AuthService(adminService, bootstrapAdmin, options);
+  const result = await firstAuthService.login('owner', 'secret123');
+  const restartedAuthService = new AuthService(adminService, bootstrapAdmin, options);
+
+  assert.equal((await restartedAuthService.verifyToken(result.token))?.adminId, admin.id);
+});
+
+test('管理员资料更新后旧 JWT token 失效', async () => {
+  const repository = new MemoryAdminRepository();
+  const adminService = new AdminService(repository);
+  const admin = await adminService.createAdmin('owner', 'secret123');
+  const authService = new AuthService(adminService, bootstrapAdmin, {
+    jwtSecret: 'test-jwt-secret-with-at-least-32-characters',
+    adminTokenTtlMs: 24 * 60 * 60 * 1000
+  });
+  const result = await authService.login('owner', 'secret123');
+
+  await adminService.updateAdmin(admin.id, { username: 'owner2' });
+
+  assert.equal(await authService.verifyToken(result.token), null);
 });

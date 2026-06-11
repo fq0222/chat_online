@@ -16,7 +16,7 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
   const router = Router();
 
   router.get('/', async (request, response) => {
-    const session = authService.verifyToken(getBearerToken(request.headers.authorization));
+    const session = await authService.verifyToken(getBearerToken(request.headers.authorization));
 
     if (!session || session.isBootstrap) {
       response.status(401).json({ message: '管理员未登录' });
@@ -39,7 +39,7 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
   });
 
   router.post('/', async (request, response) => {
-    const session = authService.verifyToken(getBearerToken(request.headers.authorization));
+    const session = await authService.verifyToken(getBearerToken(request.headers.authorization));
 
     if (!session || session.isBootstrap) {
       response.status(401).json({ message: '管理员未登录' });
@@ -75,7 +75,7 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
   });
 
   router.delete('/:roomId', async (request, response) => {
-    const session = authService.verifyToken(getBearerToken(request.headers.authorization));
+    const session = await authService.verifyToken(getBearerToken(request.headers.authorization));
 
     if (!session || session.isBootstrap) {
       response.status(401).json({ message: '管理员未登录' });

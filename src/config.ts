@@ -17,6 +17,7 @@ export type AppConfig = {
   };
   auth: {
     adminTokenTtlMs: number;
+    jwtSecret: string;
   };
 };
 
@@ -36,7 +37,8 @@ const defaultConfig: AppConfig = {
     password: 'change-me'
   },
   auth: {
-    adminTokenTtlMs: 24 * 60 * 60 * 1000
+    adminTokenTtlMs: 24 * 60 * 60 * 1000,
+    jwtSecret: 'development-only-jwt-secret-change-before-production'
   }
 };
 
@@ -50,20 +52,39 @@ export function loadConfig(): AppConfig {
     const localConfigPath = path.resolve(process.cwd(), 'config.js');
     const localConfig = require(localConfigPath) as Partial<AppConfig>;
 
-    return {
+    const config = {
       server: { ...defaultConfig.server, ...localConfig.server },
       site: { ...defaultConfig.site, ...localConfig.site },
       database: { ...defaultConfig.database, ...localConfig.database },
       bootstrapAdmin: { ...defaultConfig.bootstrapAdmin, ...localConfig.bootstrapAdmin },
       auth: { ...defaultConfig.auth, ...localConfig.auth }
     };
+
+    assertSafeProductionConfig(config);
+    return config;
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
 
     if (nodeError.code === 'MODULE_NOT_FOUND') {
+      assertSafeProductionConfig(defaultConfig);
       return defaultConfig;
     }
 
     throw error;
+  }
+}
+
+/**
+ * 校验生产环境安全配置。
+ * @param config 已合并默认值的应用配置。
+ * 核心分支：生产环境禁止继续使用模板或开发用 jwtSecret，避免可预测签名密钥上线。
+ */
+function assertSafeProductionConfig(config: AppConfig): void {
+  if (process.env.NODE_ENV !== 'production') {
+    return;
+  }
+
+  if (config.auth.jwtSecret.length < 32 || /change|development|example/i.test(config.auth.jwtSecret)) {
+    throw new Error('生产环境必须配置长度至少 32 位且不可使用模板值的 auth.jwtSecret');
   }
 }
