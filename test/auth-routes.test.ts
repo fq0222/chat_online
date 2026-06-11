@@ -86,3 +86,27 @@ test('登录接口在密码错误时返回 401', async () => {
     assert.equal(response.status, 401);
   });
 });
+
+test('登录接口在十五分钟内第 4 次尝试时返回 429', async () => {
+  await withServer(async (baseUrl) => {
+    for (let index = 0; index < 3; index += 1) {
+      const response = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: 'root', password: 'root123' })
+      });
+
+      assert.equal(response.status, 200);
+    }
+
+    const blockedResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'root', password: 'bad-pass' })
+    });
+    const body = await blockedResponse.json();
+
+    assert.equal(blockedResponse.status, 429);
+    assert.equal(body.message, '登录过于频繁，请 15 分钟后再试');
+  });
+});
