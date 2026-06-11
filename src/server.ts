@@ -21,7 +21,7 @@ export function startServer(): http.Server {
   const config = loadConfig();
   const pool = createPool();
   const adminService = new AdminService(new PostgresAdminRepository(pool));
-  const authService = new AuthService(adminService, config.bootstrapAdmin);
+  const authService = new AuthService(adminService, config.bootstrapAdmin, config.auth);
   const roomService = new RoomService(new PostgresRoomRepository(pool), config.site);
   const chatRelayService = new ChatRelayService();
   const app = createApp({ adminService, authService, roomService });

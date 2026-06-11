@@ -1118,9 +1118,10 @@ textarea:focus {
 }
 
 .guest-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
+  gap: 18px;
   border-bottom: 1px solid var(--line);
   background: #fff;
   padding: 0 18px;
@@ -1136,6 +1137,15 @@ textarea:focus {
   color: var(--muted);
   font-size: 13px;
   font-weight: 800;
+}
+
+.guest-refresh-warning {
+  margin: 0;
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .guest-timeline {

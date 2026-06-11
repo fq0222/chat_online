@@ -7,14 +7,17 @@ module.exports = {
     port: 30007
   },
   site: {
-    protocol: 'http',
-    host: 'localhost:5173'
+    protocol: 'https',
+    host: 'chat.example.com'
   },
   database: {
-    connectionString: 'postgres://postgres:postgres@localhost:5432/chat_online'
+    connectionString: 'postgres://chat_online_user:change-me@127.0.0.1:5432/chat_online'
   },
   bootstrapAdmin: {
     username: 'admin',
-    password: 'change-me'
+    password: 'change-me-strong-password'
+  },
+  auth: {
+    adminTokenTtlMs: 24 * 60 * 60 * 1000
   }
 };

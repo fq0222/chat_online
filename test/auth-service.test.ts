@@ -84,3 +84,20 @@ test('撤销管理员 token 后校验失败', async () => {
 
   assert.equal(authService.verifyToken(result.token), null);
 });
+
+test('管理员 token 超过配置有效时间后校验失败', async () => {
+  let nowMs = 1_700_000_000_000;
+  const adminService = new AdminService(new MemoryAdminRepository());
+  const admin = await adminService.createAdmin('owner', 'secret123');
+  const authService = new AuthService(adminService, bootstrapAdmin, {
+    adminTokenTtlMs: 1000,
+    now: () => new Date(nowMs)
+  });
+  const result = await authService.login('owner', 'secret123');
+
+  nowMs += 999;
+  assert.equal(authService.verifyToken(result.token)?.adminId, admin.id);
+
+  nowMs += 2;
+  assert.equal(authService.verifyToken(result.token), null);
+});

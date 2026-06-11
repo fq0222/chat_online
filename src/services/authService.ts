@@ -24,17 +24,29 @@ export type LoginResult = {
   };
 };
 
+export type AuthServiceOptions = {
+  adminTokenTtlMs: number;
+  now?: () => Date;
+};
+
 /**
  * 管理员鉴权服务。
  * 职责：处理登录、内存 token 生成与校验；关键参数为管理员服务和首次管理员配置；核心分支为数据库登录和首次引导登录。
  */
 export class AuthService {
   private readonly sessions = new Map<string, AuthSession>();
+  private readonly authOptions: AuthServiceOptions;
 
   constructor(
     private readonly adminService: AdminService,
-    private readonly bootstrapAdmin: BootstrapAdminConfig
-  ) {}
+    private readonly bootstrapAdmin: BootstrapAdminConfig,
+    options?: Partial<AuthServiceOptions>
+  ) {
+    this.authOptions = {
+      adminTokenTtlMs: 24 * 60 * 60 * 1000,
+      ...options
+    };
+  }
 
   /**
    * 管理员登录。
@@ -78,7 +90,18 @@ export class AuthService {
       return null;
     }
 
-    return this.sessions.get(token) ?? null;
+    const session = this.sessions.get(token);
+
+    if (!session) {
+      return null;
+    }
+
+    if (this.isSessionExpired(session)) {
+      this.sessions.delete(token);
+      return null;
+    }
+
+    return session;
   }
 
   /**
@@ -118,10 +141,27 @@ export class AuthService {
       adminId,
       username,
       isBootstrap,
-      createdAt: new Date()
+      createdAt: this.getNow()
     };
 
     this.sessions.set(token, session);
     return session;
+  }
+
+  /**
+   * 获取当前时间。
+   * @returns 当前系统时间；测试场景可通过 now 选项注入固定时间。
+   */
+  private getNow(): Date {
+    return this.authOptions.now?.() ?? new Date();
+  }
+
+  /**
+   * 判断管理员会话是否超过配置有效期。
+   * @param session 待检查的管理员会话。
+   * @returns 超过 adminTokenTtlMs 时返回 true，否则返回 false。
+   */
+  private isSessionExpired(session: AuthSession): boolean {
+    return this.getNow().getTime() - session.createdAt.getTime() > this.authOptions.adminTokenTtlMs;
   }
 }

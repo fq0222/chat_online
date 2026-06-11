@@ -15,6 +15,9 @@ export type AppConfig = {
     username: string;
     password: string;
   };
+  auth: {
+    adminTokenTtlMs: number;
+  };
 };
 
 const defaultConfig: AppConfig = {
@@ -31,6 +34,9 @@ const defaultConfig: AppConfig = {
   bootstrapAdmin: {
     username: 'admin',
     password: 'change-me'
+  },
+  auth: {
+    adminTokenTtlMs: 24 * 60 * 60 * 1000
   }
 };
 
@@ -48,7 +54,8 @@ export function loadConfig(): AppConfig {
       server: { ...defaultConfig.server, ...localConfig.server },
       site: { ...defaultConfig.site, ...localConfig.site },
       database: { ...defaultConfig.database, ...localConfig.database },
-      bootstrapAdmin: { ...defaultConfig.bootstrapAdmin, ...localConfig.bootstrapAdmin }
+      bootstrapAdmin: { ...defaultConfig.bootstrapAdmin, ...localConfig.bootstrapAdmin },
+      auth: { ...defaultConfig.auth, ...localConfig.auth }
     };
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
