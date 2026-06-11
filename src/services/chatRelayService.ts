@@ -51,7 +51,7 @@ export class ChatRelayService {
 
   constructor(options: ChatRelayOptions = {}) {
     this.now = options.now ?? (() => new Date());
-    this.maxImageBytes = options.maxImageBytes ?? 1024 * 1024 * 2;
+    this.maxImageBytes = options.maxImageBytes ?? 1024 * 1024 * 5;
   }
 
   /**
@@ -66,6 +66,7 @@ export class ChatRelayService {
       adminId,
       username: '管理员'
     });
+    this.sendRoomUsers(roomId);
     logger.info(`管理员连接聊天室：${roomId}`);
     return this.toPublicConnection(connection);
   }
@@ -81,6 +82,7 @@ export class ChatRelayService {
     const connection = this.createConnection(roomId, 'guest', sender, {
       username: `用户-${timestamp}`
     });
+    this.sendRoomUsers(roomId);
     logger.info(`访客连接聊天室：${roomId}`);
     return this.toPublicConnection(connection);
   }
@@ -90,7 +92,14 @@ export class ChatRelayService {
    * @param connectionId 连接 ID。
    */
   disconnect(connectionId: string): void {
+    const connection = this.connections.get(connectionId);
+
+    if (!connection) {
+      return;
+    }
+
     this.connections.delete(connectionId);
+    this.sendRoomUsers(connection.roomId);
   }
 
   /**
@@ -201,6 +210,23 @@ export class ChatRelayService {
 
   private sendEvent(connection: InternalConnection, event: string, payload: Record<string, unknown>): void {
     connection.sender.send(JSON.stringify({ event, ...payload }));
+  }
+
+  /**
+   * 向房间内管理员推送当前在线用户列表。
+   * @param roomId 房间 ID；核心分支按管理员优先、访客随后输出，供前端左侧用户列表实时刷新。
+   */
+  private sendRoomUsers(roomId: string): void {
+    const users = [...this.connections.values()]
+      .filter((connection) => connection.roomId === roomId)
+      .sort((left, right) => (left.role === right.role ? 0 : left.role === 'admin' ? -1 : 1))
+      .map((connection) => this.toPublicConnection(connection));
+
+    [...this.connections.values()]
+      .filter((connection) => connection.roomId === roomId && connection.role === 'admin')
+      .forEach((connection) => {
+        this.sendEvent(connection, 'room:users', { users });
+      });
   }
 
   private toPublicConnection(connection: InternalConnection): RelayConnection {

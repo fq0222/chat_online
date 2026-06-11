@@ -10,6 +10,16 @@ class MemorySender {
   }
 }
 
+/**
+ * 按事件类型筛选内存发送器收到的消息。
+ * @param sender 内存发送器。
+ * @param event 目标事件名；核心分支只保留匹配事件，避免 presence 消息影响业务断言。
+ * @returns 匹配事件的消息列表。
+ */
+function findEvents<T extends { event: string }>(sender: MemorySender, event: string): T[] {
+  return sender.messages.filter((message) => (message as { event?: string }).event === event) as T[];
+}
+
 test('访客连接时按时间戳生成用户名', () => {
   const relay = new ChatRelayService({ now: () => new Date('2026-06-10T12:00:00.123Z') });
   const sender = new MemorySender();
@@ -33,10 +43,12 @@ test('访客文本消息只转发给管理员', () => {
 
   relay.handleClientMessage(guest.connectionId, message);
 
-  assert.equal(adminSender.messages.length, 1);
-  assert.equal(guestSender.messages.length, 1);
-  assert.equal((adminSender.messages[0] as { payload: { text: string } }).payload.text, '你好');
-  assert.equal((guestSender.messages[0] as { event: string }).event, 'message:ack');
+  const adminMessages = findEvents<{ event: string; payload: { text: string } }>(adminSender, 'message:new');
+  const guestAcks = findEvents<{ event: string }>(guestSender, 'message:ack');
+
+  assert.equal(adminMessages.length, 1);
+  assert.equal(guestAcks.length, 1);
+  assert.equal(adminMessages[0].payload.text, '你好');
 });
 
 test('管理员消息只转发给指定访客', () => {
@@ -55,8 +67,8 @@ test('管理员消息只转发给指定访客', () => {
     payload: { text: '只发给你' }
   });
 
-  assert.equal(firstGuestSender.messages.length, 1);
-  assert.equal(secondGuestSender.messages.length, 0);
+  assert.equal(findEvents(firstGuestSender, 'message:new').length, 1);
+  assert.equal(findEvents(secondGuestSender, 'message:new').length, 0);
 });
 
 test('图片消息校验 MIME 和大小后转发', () => {
@@ -77,8 +89,30 @@ test('图片消息校验 MIME 和大小后转发', () => {
     payload: { mimeType: 'image/gif', dataUrl: 'data:image/gif;base64,MTIzNA==' }
   });
 
-  assert.equal((adminSender.messages[0] as { type: string }).type, 'image');
-  assert.equal((guestSender.messages[1] as { event: string }).event, 'message:error');
+  assert.equal(findEvents<{ event: string; type: string }>(adminSender, 'message:new')[0].type, 'image');
+  assert.equal(findEvents(guestSender, 'message:error').length, 1);
+});
+
+test('默认允许发送 5MB 以内图片并拒绝超过限制的图片', () => {
+  const relay = new ChatRelayService();
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+  relay.connectAdmin('room-1', 'admin-1', adminSender);
+  const guest = relay.connectGuest('room-1', guestSender);
+
+  relay.handleClientMessage(guest.connectionId, {
+    type: 'image',
+    clientMessageId: 'img-5mb',
+    payload: { mimeType: 'image/png', dataUrl: `data:image/png;base64,${Buffer.alloc(1024 * 1024 * 5).toString('base64')}` }
+  });
+  relay.handleClientMessage(guest.connectionId, {
+    type: 'image',
+    clientMessageId: 'img-over-5mb',
+    payload: { mimeType: 'image/png', dataUrl: `data:image/png;base64,${Buffer.alloc(1024 * 1024 * 5 + 1).toString('base64')}` }
+  });
+
+  assert.equal(findEvents<{ event: string; type: string }>(adminSender, 'message:new').length, 1);
+  assert.equal(findEvents(guestSender, 'message:error').length, 1);
 });
 
 test('转发服务不提供聊天历史列表', () => {
@@ -86,4 +120,33 @@ test('转发服务不提供聊天历史列表', () => {
 
   assert.equal(Object.hasOwn(relay, 'messages'), false);
   assert.equal('getMessages' in relay, false);
+});
+
+test('管理员收到房间在线用户快照并在访客进出时刷新', () => {
+  const relay = new ChatRelayService({ now: () => new Date('2026-06-10T12:00:00.123Z') });
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+  const admin = relay.connectAdmin('room-1', 'admin-1', adminSender);
+  const guest = relay.connectGuest('room-1', guestSender);
+
+  relay.disconnect(guest.connectionId);
+
+  const snapshots = findEvents<{ event: string; users: { connectionId: string; role: string; username: string }[] }>(
+    adminSender,
+    'room:users'
+  );
+
+  assert.equal(snapshots.length, 3);
+  assert.deepEqual(
+    snapshots[0].users.map((user) => user.connectionId),
+    [admin.connectionId]
+  );
+  assert.deepEqual(
+    snapshots[1].users.map((user) => user.connectionId),
+    [admin.connectionId, guest.connectionId]
+  );
+  assert.deepEqual(
+    snapshots[2].users.map((user) => user.connectionId),
+    [admin.connectionId]
+  );
 });
