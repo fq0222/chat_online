@@ -11,6 +11,7 @@ const {
   settingsForm,
   roomForm,
   status,
+  toast,
   showSetup,
   rooms,
   loadingRooms,
@@ -170,6 +171,7 @@ const {
   />
 
   <Teleport to="body">
+    <div v-if="toast.message" class="toast-message" :class="toast.type" role="alert">{{ toast.message }}</div>
     <div v-if="previewImage" class="image-viewer" role="dialog" aria-modal="true" @click.self="closeImagePreview">
       <button class="image-viewer-close" type="button" aria-label="关闭图片预览" @click="closeImagePreview">×</button>
       <img class="image-viewer-image" :src="previewImage.url" :alt="previewImage.alt" />

@@ -123,6 +123,11 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /createMediaSocket/);
   assert.match(frontEndSource, /imageStatus/);
   assert.match(frontEndSource, /imageProgress/);
+  assert.match(frontEndSource, /toast/);
+  assert.match(frontEndSource, /showToast/);
+  assert.match(frontEndSource, /class="toast-message"/);
+  assert.match(frontEndSource, /role="alert"/);
+  assert.match(frontEndSource, /showToast\(error,\s*'error'\)/);
   assert.match(frontEndSource, /:status="status"/);
   assert.match(frontEndSource, /status:\s*\{\s*message:\s*string;\s*type:\s*StatusType\s*\}/);
   assert.match(frontEndSource, /class="status-text chat-status"/);

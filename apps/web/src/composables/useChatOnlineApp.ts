@@ -65,6 +65,7 @@ export function useChatOnlineApp() {
   const controlConnectionId = ref('');
   const reconnectPolicy = createReconnectPolicy({ maxAttempts: Number.POSITIVE_INFINITY, delayMs: 5000 });
   const reconnectTimerRef = ref<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef = ref<number | null>(null);
   const reconnectGeneration = ref(0);
   const shouldReconnectSocket = ref(true);
   const messageTimelineRef = ref<HTMLElement | null>(null);
@@ -75,6 +76,7 @@ export function useChatOnlineApp() {
   const roomUsers = ref<RoomUser[]>([]);
   const roomConversations = ref<Record<string, ChatMessage[]>>({});
   const chatMessages = ref<ChatMessage[]>([]);
+  const toast = reactive({ message: '', type: 'plain' as StatusType });
   const outgoingImageBatches = new Map<
     string,
     { imageId: string; chunks: ImageChunk[]; localDataUrl: string; localMessageId: string }
@@ -113,6 +115,17 @@ export function useChatOnlineApp() {
     if (reconnectTimerRef.value) {
       clearTimeout(reconnectTimerRef.value);
       reconnectTimerRef.value = null;
+    }
+  }
+
+  /**
+   * 清理尚未执行的 toast 自动关闭定时器。
+   * 核心分支：新的 toast 出现或页面卸载时取消旧定时器，避免旧回调清掉新提示。
+   */
+  function clearToastTimer(): void {
+    if (toastTimerRef.value) {
+      window.clearTimeout(toastTimerRef.value);
+      toastTimerRef.value = null;
     }
   }
 
@@ -747,14 +760,14 @@ export function useChatOnlineApp() {
    */
   async function prepareImageFile(file: File): Promise<void> {
     if (pendingImages.value.length >= maxPendingImages) {
-      setStatus(`每次最多发送 ${maxPendingImages} 张图片。`, 'error');
+      showToast(`每次最多发送 ${maxPendingImages} 张图片。`, 'error');
       return;
     }
 
     const error = getImageFileError(file);
 
     if (error) {
-      setStatus(error, 'error');
+      showToast(error, 'error');
       return;
     }
 
@@ -765,7 +778,7 @@ export function useChatOnlineApp() {
         const compressedImage = await compressImageFileForChat(file);
 
         if (compressedImage.compressedBytes > maxImageBytes) {
-          setStatus('图片压缩后仍超过 5MB，请换一张更小的图片。', 'error');
+          showToast('图片压缩后仍超过 5MB，请换一张更小的图片。', 'error');
           imageLogger.warn(
             `图片压缩后仍超过限制：${file.name || '未命名'} ${formatByteSize(file.size)} -> ${formatByteSize(compressedImage.compressedBytes)}`
           );
@@ -798,13 +811,13 @@ export function useChatOnlineApp() {
       }
 
       if (pendingImages.value.length >= maxPendingImages) {
-        setStatus(`每次最多发送 ${maxPendingImages} 张图片。`, 'error');
+        showToast(`每次最多发送 ${maxPendingImages} 张图片。`, 'error');
         return;
       }
 
       pendingImages.value = [...pendingImages.value, image];
     } catch (readError) {
-      setStatus((readError as Error).message, 'error');
+      showToast((readError as Error).message, 'error');
     }
   }
 
@@ -951,7 +964,7 @@ export function useChatOnlineApp() {
     const remainCount = Math.max(0, maxPendingImages - pendingImages.value.length);
 
     if (files.length > remainCount) {
-      setStatus(`每次最多发送 ${maxPendingImages} 张图片。`, 'error');
+      showToast(`每次最多发送 ${maxPendingImages} 张图片。`, 'error');
     }
 
     files.slice(0, remainCount).forEach((file) => {
@@ -979,7 +992,7 @@ export function useChatOnlineApp() {
     const remainCount = Math.max(0, maxPendingImages - pendingImages.value.length);
 
     if (files.length > remainCount) {
-      setStatus(`每次最多发送 ${maxPendingImages} 张图片。`, 'error');
+      showToast(`每次最多发送 ${maxPendingImages} 张图片。`, 'error');
     }
 
     files.slice(0, remainCount).forEach((file) => {
@@ -995,6 +1008,27 @@ export function useChatOnlineApp() {
   function setStatus(message: string, type: StatusType = 'plain'): void {
     status.message = message;
     status.type = type;
+  }
+
+  /**
+   * 展示一次性 toast 提示。
+   * @param message 提示文案；核心分支为空时立即清空当前 toast。
+   * @param type 提示类型；错误提示会使用醒目的 toast 样式。
+   */
+  function showToast(message: string, type: StatusType = 'plain'): void {
+    clearToastTimer();
+    toast.message = message;
+    toast.type = type;
+
+    if (!message) {
+      return;
+    }
+
+    toastTimerRef.value = window.setTimeout(() => {
+      toast.message = '';
+      toast.type = 'plain';
+      toastTimerRef.value = null;
+    }, 2600);
   }
 
   /**
@@ -1245,7 +1279,7 @@ export function useChatOnlineApp() {
         method: 'GET'
       });
       guestRoom.value = result.room;
-      setStatus('聊天室已连接，正在等待客服。', 'success');
+      setStatus('');
     } catch (error) {
       setStatus((error as Error).message, 'error');
     }
@@ -1727,6 +1761,7 @@ export function useChatOnlineApp() {
 
   onUnmounted(() => {
     window.removeEventListener('keydown', handleImagePreviewKeydown);
+    clearToastTimer();
     stopSocketReconnect();
   });
 
@@ -1736,6 +1771,7 @@ export function useChatOnlineApp() {
     settingsForm,
     roomForm,
     status,
+    toast,
     showSetup,
     rooms,
     guestRoom,
