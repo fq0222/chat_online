@@ -176,7 +176,7 @@ function getRoomUserActiveKey(user: RoomUser): string {
                 @paste="emit('composer-paste', $event)"
               ></textarea>
             </div>
-            <input :ref="setImageInputElement" class="image-input" type="file" accept="image/*" multiple @change="emit('image-select', $event)" />
+            <input :ref="setImageInputElement" class="image-input" type="file" accept="image/*" @change="emit('image-select', $event)" />
             <div class="composer-action-stack">
               <button class="composer-upload-button" type="button" aria-label="选择图片" @click="emit('open-image-picker')">+</button>
               <button class="primary-button send-button" type="submit" :disabled="!canSendMessage">发送</button>

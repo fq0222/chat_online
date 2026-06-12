@@ -42,7 +42,7 @@ export function useChatOnlineApp() {
   const maxImageBytes = 1024 * 1024 * 5;
   const maxImagePreviewBytes = 1024 * 64;
   const imageChunkSize = 1024 * 32;
-  const maxPendingImages = 5;
+  const maxPendingImages = 1;
   const socketHeartbeatMs = 25 * 1000;
 
   const loginForm = reactive({ username: '', password: '' });
@@ -1052,7 +1052,7 @@ export function useChatOnlineApp() {
 
   /**
    * 处理本地图片选择。
-   * @param event 文件输入事件；核心分支追加用户选择的图片，超出 5 张时只保留可追加数量并提示。
+   * @param event 文件输入事件；核心分支追加用户选择的图片，超出 1 张时只保留可追加数量并提示。
    */
   function handleImageSelect(event: Event): void {
     const input = event.target as HTMLInputElement;
@@ -1072,7 +1072,7 @@ export function useChatOnlineApp() {
 
   /**
    * 处理输入框粘贴图片。
-   * @param event 粘贴事件；核心分支为剪贴板含图片时阻止默认文本粘贴并追加最多 5 张缩略图。
+   * @param event 粘贴事件；核心分支为剪贴板含图片时阻止默认文本粘贴并追加最多 1 张缩略图。
    */
   function handleComposerPaste(event: ClipboardEvent): void {
     const files = [...(event.clipboardData?.items ?? [])]
