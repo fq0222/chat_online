@@ -10,6 +10,8 @@ type QueuedChunk = {
   chunk: ImageChunk;
 };
 
+const mediaHeartbeatMs = 25 * 1000;
+
 /**
  * 创建图片媒体 WebSocket 客户端。
  * @param url 媒体 WebSocket 地址。
@@ -19,6 +21,7 @@ type QueuedChunk = {
 export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
   const socket = new WebSocket(url);
   const queue: QueuedChunk[] = [];
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
    * 发送已排队的图片分片。
@@ -36,7 +39,41 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
     }
   }
 
-  socket.addEventListener('open', flushQueue);
+  /**
+   * 启动媒体通道应用层心跳。
+   * 核心分支：主动发送小 JSON 包，避免 Cloudflare Tunnel/OpenResty 回收空闲 WebSocket。
+   */
+  function startMediaHeartbeat(): void {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+    }
+
+    const sendPing = () => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'ping' }));
+      }
+    };
+
+    sendPing();
+    heartbeatTimer = setInterval(sendPing, mediaHeartbeatMs);
+  }
+
+  /**
+   * 停止媒体通道心跳。
+   * 核心分支：连接关闭或主动关闭时释放定时器。
+   */
+  function stopMediaHeartbeat(): void {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
+
+  socket.addEventListener('open', () => {
+    flushQueue();
+    startMediaHeartbeat();
+  });
+  socket.addEventListener('close', stopMediaHeartbeat);
   socket.addEventListener('message', (event) => {
     const data = JSON.parse(event.data) as {
       event: string;
@@ -46,6 +83,10 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
       data?: string;
       message?: string;
     };
+
+    if (data.event === 'pong') {
+      return;
+    }
 
     if (data.event === 'image:chunk' && data.imageId && typeof data.chunkIndex === 'number' && typeof data.totalChunks === 'number' && data.data) {
       handlers.onChunk({ imageId: data.imageId, chunkIndex: data.chunkIndex, totalChunks: data.totalChunks, data: data.data });
@@ -81,6 +122,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
      */
     close(): void {
       queue.length = 0;
+      stopMediaHeartbeat();
       socket.close();
     }
   };

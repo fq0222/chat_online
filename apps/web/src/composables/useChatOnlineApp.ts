@@ -42,6 +42,7 @@ export function useChatOnlineApp() {
   const maxImagePreviewBytes = 1024 * 64;
   const imageChunkSize = 1024 * 32;
   const maxPendingImages = 5;
+  const socketHeartbeatMs = 25 * 1000;
 
   const loginForm = reactive({ username: '', password: '' });
   const setupForm = reactive({ username: '', password: '' });
@@ -62,7 +63,7 @@ export function useChatOnlineApp() {
   const socketRef = ref<WebSocket | null>(null);
   const mediaSocketRef = ref<ReturnType<typeof createMediaSocket> | null>(null);
   const controlConnectionId = ref('');
-  const reconnectPolicy = createReconnectPolicy({ maxAttempts: 3, delayMs: 5000 });
+  const reconnectPolicy = createReconnectPolicy({ maxAttempts: Number.POSITIVE_INFINITY, delayMs: 5000 });
   const reconnectTimerRef = ref<ReturnType<typeof setTimeout> | null>(null);
   const reconnectGeneration = ref(0);
   const shouldReconnectSocket = ref(true);
@@ -174,6 +175,26 @@ export function useChatOnlineApp() {
     controlConnectionId.value = '';
     socketRef.value?.close();
     socketRef.value = null;
+  }
+
+  /**
+   * 启动聊天控制通道应用层心跳。
+   * @param socket 当前聊天 WebSocket；核心分支为定时发送小 ping 包，避免 Cloudflare Tunnel 回收空闲连接。
+   * @returns 停止心跳的函数。
+   */
+  function startSocketHeartbeat(socket: WebSocket): () => void {
+    const sendPing = () => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'ping' }));
+      }
+    };
+    const heartbeatTimer = setInterval(sendPing, socketHeartbeatMs);
+
+    sendPing();
+
+    return () => {
+      clearInterval(heartbeatTimer);
+    };
   }
 
   const page = computed<PageName>(() => {
@@ -1402,10 +1423,13 @@ export function useChatOnlineApp() {
     );
     socketRef.value = socket;
     connectionStatus.value = '正在连接实时服务';
+    let stopHeartbeat: (() => void) | null = null;
 
     socket.addEventListener('open', () => {
       reconnectPolicy.reset();
       connectionStatus.value = '实时服务已连接';
+      stopHeartbeat?.();
+      stopHeartbeat = startSocketHeartbeat(socket);
     });
     socket.addEventListener('message', (event) => {
       const data = JSON.parse(event.data) as {
@@ -1426,6 +1450,10 @@ export function useChatOnlineApp() {
         message?: string;
         clientMessageId?: string;
       };
+
+      if (data.event === 'pong') {
+        return;
+      }
 
       if (data.event === 'connection:ready' && data.connection) {
         controlConnectionId.value = data.connection.connectionId;
@@ -1489,13 +1517,14 @@ export function useChatOnlineApp() {
       }, sentAt);
     });
     socket.addEventListener('close', () => {
+      stopHeartbeat?.();
       mediaSocketRef.value?.close();
       mediaSocketRef.value = null;
       scheduleSocketReconnect(
         generation,
         () => connectChatSocket(roomId),
-        (attempt) => `实时服务已断开，5 秒后第 ${attempt}/3 次重连`,
-        '实时服务已断开，重连失败'
+        (attempt) => `实时服务已断开，5 秒后第 ${attempt} 次重连`,
+        '实时服务已断开，等待下次重连'
       );
     });
   }
@@ -1515,10 +1544,13 @@ export function useChatOnlineApp() {
     const socket = new WebSocket(`${protocol}//${window.location.host}/ws/chat?role=guest&roomId=${encodeURIComponent(roomId)}`);
     socketRef.value = socket;
     connectionStatus.value = '正在连接客服';
+    let stopHeartbeat: (() => void) | null = null;
 
     socket.addEventListener('open', () => {
       reconnectPolicy.reset();
       connectionStatus.value = '已进入聊天室';
+      stopHeartbeat?.();
+      stopHeartbeat = startSocketHeartbeat(socket);
     });
     socket.addEventListener('message', (event) => {
       const data = JSON.parse(event.data) as {
@@ -1537,6 +1569,10 @@ export function useChatOnlineApp() {
         message?: string;
         clientMessageId?: string;
       };
+
+      if (data.event === 'pong') {
+        return;
+      }
 
       if (data.event === 'connection:ready' && data.connection) {
         controlConnectionId.value = data.connection.connectionId;
@@ -1599,13 +1635,14 @@ export function useChatOnlineApp() {
       scrollToLatestReadMessage();
     });
     socket.addEventListener('close', () => {
+      stopHeartbeat?.();
       mediaSocketRef.value?.close();
       mediaSocketRef.value = null;
       scheduleSocketReconnect(
         generation,
         () => connectGuestChatSocket(roomId),
-        (attempt) => `连接已断开，5 秒后第 ${attempt}/3 次重连`,
-        '连接已断开，重连失败'
+        (attempt) => `连接已断开，5 秒后第 ${attempt} 次重连`,
+        '连接已断开，等待下次重连'
       );
     });
   }

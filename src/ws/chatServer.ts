@@ -7,6 +7,33 @@ import type { RoomService } from '../services/roomService';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('WebSocket');
+const websocketHeartbeatMs = 25 * 1000;
+
+/**
+ * 为服务端 WebSocket 添加协议层心跳。
+ * @param socket WebSocket 连接；核心分支为定时 ping，连续无 pong 时终止僵尸连接。
+ * @returns 清理心跳定时器的方法。
+ */
+function attachServerHeartbeat(socket: WebSocket): () => void {
+  let isAlive = true;
+  const heartbeatTimer = setInterval(() => {
+    if (!isAlive) {
+      socket.terminate();
+      return;
+    }
+
+    isAlive = false;
+    socket.ping();
+  }, websocketHeartbeatMs);
+
+  socket.on('pong', () => {
+    isAlive = true;
+  });
+
+  return () => {
+    clearInterval(heartbeatTimer);
+  };
+}
 
 /**
  * 挂载聊天室 WebSocket 服务。
@@ -60,6 +87,7 @@ export function attachChatServer(
   });
 
   wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: { roomId: string; role: string; adminSession?: AuthSession }) => {
+    const stopHeartbeat = attachServerHeartbeat(socket);
     const sender = { send: (message: string) => socket.send(message) };
     const connection =
       context.role === 'admin' && context.adminSession
@@ -71,6 +99,12 @@ export function attachChatServer(
     socket.on('message', (rawMessage) => {
       try {
         const message = JSON.parse(rawMessage.toString()) as ClientMessage;
+
+        if ((message as { type?: string }).type === 'ping') {
+          socket.send(JSON.stringify({ event: 'pong' }));
+          return;
+        }
+
         dependencies.chatRelayService.handleClientMessage(connection.connectionId, message);
       } catch (error) {
         socket.send(JSON.stringify({ event: 'message:error', message: '消息格式错误' }));
@@ -78,6 +112,7 @@ export function attachChatServer(
     });
 
     socket.on('close', () => {
+      stopHeartbeat();
       dependencies.chatRelayService.disconnect(connection.connectionId);
       logger.info(`连接已断开：${connection.roomId} ${connection.role}`);
     });

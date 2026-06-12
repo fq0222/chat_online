@@ -8,6 +8,7 @@ import type { RoomService } from '../services/roomService';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('媒体转发');
+const websocketHeartbeatMs = 25 * 1000;
 
 type MediaUpgradeContext = {
   roomId: string;
@@ -15,6 +16,32 @@ type MediaUpgradeContext = {
   connectionId: string;
   adminSession?: AuthSession;
 };
+
+/**
+ * 为媒体 WebSocket 添加协议层心跳。
+ * @param socket WebSocket 连接；核心分支为定时 ping，连续无 pong 时终止僵尸连接。
+ * @returns 清理心跳定时器的方法。
+ */
+function attachServerHeartbeat(socket: WebSocket): () => void {
+  let isAlive = true;
+  const heartbeatTimer = setInterval(() => {
+    if (!isAlive) {
+      socket.terminate();
+      return;
+    }
+
+    isAlive = false;
+    socket.ping();
+  }, websocketHeartbeatMs);
+
+  socket.on('pong', () => {
+    isAlive = true;
+  });
+
+  return () => {
+    clearInterval(heartbeatTimer);
+  };
+}
 
 /**
  * 挂载图片媒体 WebSocket 服务。
@@ -82,6 +109,7 @@ export function attachMediaServer(
   });
 
   wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: MediaUpgradeContext) => {
+    const stopHeartbeat = attachServerHeartbeat(socket);
     const sender = { send: (message: string) => socket.send(message) };
     const connection = dependencies.chatMediaRelayService.connectMedia(
       { connectionId: context.connectionId, roomId: context.roomId, role: context.role },
@@ -91,6 +119,12 @@ export function attachMediaServer(
     socket.on('message', (rawMessage) => {
       try {
         const message = JSON.parse(rawMessage.toString()) as ImageChunkMessage;
+
+        if ((message as { type?: string }).type === 'ping') {
+          socket.send(JSON.stringify({ event: 'pong' }));
+          return;
+        }
+
         const result = dependencies.chatMediaRelayService.handleChunk(connection.connectionId, message);
 
         if (!result.ok) {
@@ -102,6 +136,7 @@ export function attachMediaServer(
     });
 
     socket.on('close', () => {
+      stopHeartbeat();
       dependencies.chatMediaRelayService.disconnectMedia(connection.connectionId);
       logger.info(`媒体连接已断开：${connection.roomId} ${connection.role}`);
     });

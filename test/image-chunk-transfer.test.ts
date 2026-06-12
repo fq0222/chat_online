@@ -42,3 +42,28 @@ test('dataURL 可以转换为 Blob 后继续分片', async () => {
   assert.equal(await blob.text(), 'hello');
   assert.equal(chunks.totalChunks, 3);
 });
+
+test('浏览器不支持 crypto.randomUUID 时仍能生成图片分片 ID', async () => {
+  const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: {
+      getRandomValues(bytes: Uint8Array): Uint8Array {
+        bytes.fill(7);
+        return bytes;
+      }
+    }
+  });
+
+  try {
+    const chunks = await createImageChunks(new Blob(['abc'], { type: 'image/png' }), 2);
+
+    assert.equal(chunks.imageId.startsWith('image-'), true);
+    assert.equal(chunks.totalChunks, 2);
+  } finally {
+    if (originalCrypto) {
+      Object.defineProperty(globalThis, 'crypto', originalCrypto);
+    }
+  }
+});

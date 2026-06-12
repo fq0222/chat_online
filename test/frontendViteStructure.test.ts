@@ -202,11 +202,21 @@ test('后端必须挂载独立图片媒体 WebSocket 通道', () => {
   const mediaServer = fs.readFileSync(path.join(root, 'src/ws/mediaServer.ts'), 'utf8');
   const chatServer = fs.readFileSync(path.join(root, 'src/ws/chatServer.ts'), 'utf8');
   const serverTs = fs.readFileSync(path.join(root, 'src/server.ts'), 'utf8');
+  const appRuntime = readWebSource('composables/useChatOnlineApp.ts');
+  const mediaSocket = readWebSource('utils/mediaSocket.ts');
 
   assert.match(mediaServer, /url\.pathname !== '\/ws\/media'/);
   assert.match(mediaServer, /chatMediaRelayService/);
   assert.match(mediaServer, /connectionId/);
   assert.match(chatServer, /connection:ready/);
+  assert.match(chatServer, /socket\.ping\(\)/);
+  assert.match(chatServer, /event:\s*'pong'/);
+  assert.match(mediaServer, /socket\.ping\(\)/);
+  assert.match(mediaServer, /event:\s*'pong'/);
+  assert.match(appRuntime, /startSocketHeartbeat/);
+  assert.match(appRuntime, /type:\s*'ping'/);
+  assert.match(mediaSocket, /startMediaHeartbeat/);
+  assert.match(mediaSocket, /type:\s*'ping'/);
   assert.match(serverTs, /attachMediaServer/);
   assert.match(serverTs, /new ChatMediaRelayService/);
 });
