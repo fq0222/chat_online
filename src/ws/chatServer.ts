@@ -82,11 +82,16 @@ export function attachChatServer(
     }
 
     wsServer.handleUpgrade(request, socket, head, (socketInstance) => {
-      wsServer.emit('connection', socketInstance, request, { roomId, role, adminSession: role === 'admin' ? session : undefined });
+      wsServer.emit('connection', socketInstance, request, {
+        roomId,
+        role,
+        adminSession: role === 'admin' ? session : undefined,
+        welcomeMessage: room.welcomeMessage
+      });
     });
   });
 
-  wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: { roomId: string; role: string; adminSession?: AuthSession }) => {
+  wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: { roomId: string; role: string; adminSession?: AuthSession; welcomeMessage?: string }) => {
     const stopHeartbeat = attachServerHeartbeat(socket);
     const sender = { send: (message: string) => socket.send(message) };
     const connection =
@@ -95,6 +100,10 @@ export function attachChatServer(
         : dependencies.chatRelayService.connectGuest(context.roomId, sender);
 
     socket.send(JSON.stringify({ event: 'connection:ready', connection }));
+
+    if (context.role === 'guest' && context.welcomeMessage) {
+      dependencies.chatRelayService.sendWelcomeMessageToGuest(context.roomId, connection.connectionId, context.welcomeMessage);
+    }
 
     socket.on('message', (rawMessage) => {
       try {

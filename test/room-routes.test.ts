@@ -42,8 +42,8 @@ class MemoryAdminRepository implements AdminRepository {
 class MemoryRoomRepository implements RoomRepository {
   private rooms: RoomRecord[] = [];
 
-  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active'; remarkName?: string }): Promise<RoomRecord> {
-    const room = { ...data, remarkName: data.remarkName ?? '', createdAt: new Date(), updatedAt: new Date() };
+  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active'; remarkName?: string; welcomeMessage?: string }): Promise<RoomRecord> {
+    const room = { ...data, remarkName: data.remarkName ?? '', welcomeMessage: data.welcomeMessage ?? '', createdAt: new Date(), updatedAt: new Date() };
     this.rooms.push(room);
     return room;
   }
@@ -68,6 +68,25 @@ class MemoryRoomRepository implements RoomRepository {
     }
 
     room.status = status;
+    room.updatedAt = new Date();
+    return room;
+  }
+
+  async updateRoom(id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string }): Promise<RoomRecord | null> {
+    const room = this.rooms.find((item) => item.id === id && item.adminId === adminId);
+
+    if (!room) {
+      return null;
+    }
+
+    if (data.remarkName !== undefined) {
+      room.remarkName = data.remarkName;
+    }
+
+    if (data.welcomeMessage !== undefined) {
+      room.welcomeMessage = data.welcomeMessage;
+    }
+
     room.updatedAt = new Date();
     return room;
   }
@@ -187,6 +206,45 @@ test('管理员可以列出自己的房间并真实删除房间', async () => {
     assert.equal(deleteBody.room.id, createBody.room.id);
     assert.equal(listAfterDeleteBody.rooms.length, 0);
     assert.equal(getAfterDeleteResponse.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test('管理员可以在聊天室列表编辑弹窗中保存房间备注和首次进入欢迎语', async () => {
+  const server = await createTestServer();
+
+  try {
+    const token = await login(server.baseUrl);
+    const createResponse = await fetch(`${server.baseUrl}/api/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ remarkName: '售前咨询' })
+    });
+    const createBody = await createResponse.json();
+    const updateResponse = await fetch(`${server.baseUrl}/api/rooms/${createBody.room.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        remarkName: '  售后支持  ',
+        welcomeMessage: '  欢迎咨询，请描述您的问题。  '
+      })
+    });
+    const updateBody = await updateResponse.json();
+    const listResponse = await fetch(`${server.baseUrl}/api/rooms`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const listBody = await listResponse.json();
+    const shareResponse = await fetch(`${server.baseUrl}/api/rooms/share/${createBody.room.shareSlug}`);
+    const shareBody = await shareResponse.json();
+
+    assert.equal(updateResponse.status, 200);
+    assert.equal(updateBody.room.remarkName, '售后支持');
+    assert.equal(updateBody.room.welcomeMessage, '欢迎咨询，请描述您的问题。');
+    assert.equal(listBody.rooms[0].remarkName, '售后支持');
+    assert.equal(listBody.rooms[0].welcomeMessage, '欢迎咨询，请描述您的问题。');
+    assert.equal(shareBody.room.remarkName, '售后支持');
+    assert.equal(shareBody.room.welcomeMessage, '欢迎咨询，请描述您的问题。');
   } finally {
     await server.close();
   }

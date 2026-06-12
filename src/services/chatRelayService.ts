@@ -154,6 +154,46 @@ export class ChatRelayService {
   }
 
   /**
+   * 向指定访客自动发送房间首次进入欢迎语。
+   * @param roomId 房间 ID；核心分支会校验目标访客仍在该房间内，避免跨房间误发。
+   * @param guestConnectionId 访客连接 ID；管理员连接不会收到也不会触发欢迎语。
+   * @param welcomeMessage 管理员配置的欢迎语；空白文本会被忽略。
+   */
+  sendWelcomeMessageToGuest(roomId: string, guestConnectionId: string, welcomeMessage: string): void {
+    const text = welcomeMessage.trim();
+
+    if (!text) {
+      return;
+    }
+
+    const guest = this.connections.get(guestConnectionId);
+
+    if (!guest || guest.roomId !== roomId || guest.role !== 'guest') {
+      return;
+    }
+
+    const from: RelayConnection = {
+      connectionId: `room-welcome:${roomId}`,
+      roomId,
+      role: 'admin',
+      username: '管理员'
+    };
+
+    guest.sender.send(
+      JSON.stringify({
+        event: 'message:new',
+        serverMessageId: crypto.randomUUID(),
+        roomId,
+        type: 'text',
+        from,
+        to: this.toPublicConnection(guest),
+        sentAt: this.now().toISOString(),
+        payload: { text }
+      })
+    );
+  }
+
+  /**
    * 处理客户端消息并转发给目标连接。
    * @param connectionId 发送方连接 ID。
    * @param message 客户端消息，支持 text、image 和 image:start。

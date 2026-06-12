@@ -5,6 +5,7 @@ export type RoomRecord = {
   adminId: string;
   shareSlug: string;
   remarkName: string;
+  welcomeMessage: string;
   status: 'active' | 'closed';
   createdAt: Date;
   updatedAt: Date;
@@ -15,16 +16,18 @@ export type RoomInfo = {
   adminId: string;
   shareSlug: string;
   remarkName: string;
+  welcomeMessage: string;
   status: 'active' | 'closed';
   createdAt: string;
   shareUrl?: string;
 };
 
 export type RoomRepository = {
-  createRoom: (data: { id: string; adminId: string; shareSlug: string; remarkName: string; status: 'active' }) => Promise<RoomRecord>;
+  createRoom: (data: { id: string; adminId: string; shareSlug: string; remarkName: string; welcomeMessage: string; status: 'active' }) => Promise<RoomRecord>;
   findById: (id: string) => Promise<RoomRecord | null>;
   findByAdminId: (adminId: string) => Promise<RoomRecord[]>;
   findByShareSlug: (shareSlug: string) => Promise<RoomRecord | null>;
+  updateRoom: (id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string }) => Promise<RoomRecord | null>;
   updateStatus: (id: string, adminId: string, status: 'active' | 'closed') => Promise<RoomRecord | null>;
   deleteRoom: (id: string, adminId: string) => Promise<RoomRecord | null>;
 };
@@ -50,7 +53,7 @@ export class RoomService {
    * @param remarkName 管理员填写的房间备注名称；空值会保存为空字符串。
    * @returns 房间记录和可分享给访客的链接。
    */
-  async createRoom(adminId: string, remarkName = ''): Promise<{ room: RoomRecord; shareUrl: string }> {
+  async createRoom(adminId: string, remarkName = '', welcomeMessage = ''): Promise<{ room: RoomRecord; shareUrl: string }> {
     const id = crypto.randomUUID();
     const shareSlug = crypto.randomUUID();
     const room = await this.repository.createRoom({
@@ -58,6 +61,7 @@ export class RoomService {
       adminId,
       shareSlug,
       remarkName: this.normalizeRemarkName(remarkName),
+      welcomeMessage: this.normalizeWelcomeMessage(welcomeMessage),
       status: 'active'
     });
 
@@ -102,6 +106,22 @@ export class RoomService {
   }
 
   /**
+   * 更新管理员自己的聊天室配置。
+   * @param roomId 房间 ID。
+   * @param adminId 管理员 ID；核心分支限制只能修改自己创建的房间。
+   * @param data 可更新配置；remarkName 为空时清空备注，welcomeMessage 为空时关闭访客首次进入欢迎语。
+   * @returns 更新后的房间信息；房间不存在或不属于该管理员时返回 null。
+   */
+  async updateRoomSettings(roomId: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string }): Promise<RoomInfo | null> {
+    const room = await this.repository.updateRoom(roomId, adminId, {
+      ...(data.remarkName !== undefined ? { remarkName: this.normalizeRemarkName(data.remarkName) } : {}),
+      ...(data.welcomeMessage !== undefined ? { welcomeMessage: this.normalizeWelcomeMessage(data.welcomeMessage) } : {})
+    });
+
+    return room ? this.toRoomInfo(room, true) : null;
+  }
+
+  /**
    * 真实删除管理员自己的聊天室。
    * @param roomId 房间 ID。
    * @param adminId 管理员 ID。
@@ -134,6 +154,7 @@ export class RoomService {
       adminId: room.adminId,
       shareSlug: room.shareSlug,
       remarkName: room.remarkName,
+      welcomeMessage: room.welcomeMessage,
       status: room.status,
       createdAt: room.createdAt.toISOString(),
       ...(includeShareUrl ? { shareUrl: this.buildShareUrl(room.shareSlug) } : {})
@@ -147,6 +168,15 @@ export class RoomService {
    */
   private normalizeRemarkName(remarkName: string): string {
     return remarkName.trim().slice(0, 120);
+  }
+
+  /**
+   * 规范化访客首次进入欢迎语。
+   * @param welcomeMessage 管理员输入的欢迎语；核心分支为去除首尾空白并限制长度，空字符串会关闭自动欢迎语。
+   * @returns 最长 1000 字符的欢迎语文本。
+   */
+  private normalizeWelcomeMessage(welcomeMessage: string): string {
+    return welcomeMessage.trim().slice(0, 1000);
   }
 
   private buildShareUrl(shareSlug: string): string {

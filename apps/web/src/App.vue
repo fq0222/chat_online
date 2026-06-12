@@ -10,6 +10,7 @@ const {
   setupForm,
   settingsForm,
   roomForm,
+  roomEditDialog,
   status,
   toast,
   showSetup,
@@ -36,6 +37,9 @@ const {
   setImageInputElement,
   getRoomUserName,
   getRoomUserAvatar,
+  openRoomEditor,
+  closeRoomEditor,
+  updateRoomEditField,
   toggleSoundReminder,
   toggleChatHistoryStorage,
   selectRoomUser,
@@ -44,6 +48,7 @@ const {
   submitSettings,
   logout,
   createRoom,
+  saveRoomSettings,
   copyShareUrl,
   deleteRoom,
   sendMessage,
@@ -72,12 +77,17 @@ const {
     v-else-if="page === 'rooms'"
     :rooms="rooms"
     :room-form="roomForm"
+    :room-edit-dialog="roomEditDialog"
     :loading-rooms="loadingRooms"
     :copied-room-id="copiedRoomId"
     :active-rooms-count="activeRoomsCount"
     :status="status"
     @logout="logout"
     @create-room="createRoom"
+    @open-room-editor="openRoomEditor"
+    @close-room-editor="closeRoomEditor"
+    @update-room-edit-field="updateRoomEditField"
+    @save-room-settings="saveRoomSettings"
     @copy-share-url="copyShareUrl"
     @delete-room="deleteRoom"
   />

@@ -22,6 +22,7 @@ export type RoomInfo = {
   adminId: string;
   shareSlug: string;
   remarkName: string;
+  welcomeMessage: string;
   status: 'active' | 'closed';
   createdAt: string;
   shareUrl: string;

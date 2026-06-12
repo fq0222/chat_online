@@ -48,6 +48,7 @@ export function useChatOnlineApp() {
   const setupForm = reactive({ username: '', password: '' });
   const settingsForm = reactive({ username: '', password: '' });
   const roomForm = reactive({ remarkName: '' });
+  const roomEditDialog = reactive({ visible: false, roomId: '', remarkName: '', welcomeMessage: '' });
   const status = reactive({ message: '', type: 'plain' as StatusType });
   const showSetup = ref(false);
   const bootstrapToken = ref('');
@@ -1165,6 +1166,37 @@ export function useChatOnlineApp() {
   }
 
   /**
+   * 打开房间编辑弹窗。
+   * @param room 要编辑的房间；核心分支把当前备注和欢迎语复制到弹窗草稿中，取消时不污染列表数据。
+   */
+  function openRoomEditor(room: RoomInfo): void {
+    roomEditDialog.visible = true;
+    roomEditDialog.roomId = room.id;
+    roomEditDialog.remarkName = room.remarkName;
+    roomEditDialog.welcomeMessage = room.welcomeMessage ?? '';
+  }
+
+  /**
+   * 关闭房间编辑弹窗并清空草稿。
+   * 核心分支：保存成功或用户取消时都释放当前房间 ID，避免下一次误提交旧房间。
+   */
+  function closeRoomEditor(): void {
+    roomEditDialog.visible = false;
+    roomEditDialog.roomId = '';
+    roomEditDialog.remarkName = '';
+    roomEditDialog.welcomeMessage = '';
+  }
+
+  /**
+   * 更新房间编辑弹窗字段。
+   * @param field 字段名；核心分支只允许备注和欢迎语两个字段，避免模板误写其他状态。
+   * @param value 输入框当前文本。
+   */
+  function updateRoomEditField(field: 'remarkName' | 'welcomeMessage', value: string): void {
+    roomEditDialog[field] = value;
+  }
+
+  /**
    * 发送 JSON API 请求。
    * @param url 请求地址。
    * @param options fetch 选项；核心分支负责解析后端错误并抛出可展示消息。
@@ -1303,6 +1335,34 @@ export function useChatOnlineApp() {
       rooms.value = [{ ...result.room, shareUrl: result.shareUrl }, ...rooms.value];
       roomForm.remarkName = '';
       setStatus('聊天室创建成功。', 'success');
+    } catch (error) {
+      setStatus((error as Error).message, 'error');
+    }
+  }
+
+  /**
+   * 保存房间编辑弹窗中的备注和欢迎语。
+   * 核心分支：必须有当前房间 ID 才提交，后端返回后替换列表中的对应房间并关闭弹窗。
+   */
+  async function saveRoomSettings(): Promise<void> {
+    if (!roomEditDialog.roomId) {
+      return;
+    }
+
+    setStatus('正在保存房间设置...');
+
+    try {
+      const result = await requestJson<{ room: RoomInfo }>(`/api/rooms/${roomEditDialog.roomId}`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          remarkName: roomEditDialog.remarkName,
+          welcomeMessage: roomEditDialog.welcomeMessage
+        })
+      });
+      rooms.value = rooms.value.map((item) => (item.id === result.room.id ? result.room : item));
+      closeRoomEditor();
+      setStatus('房间设置已保存。', 'success');
     } catch (error) {
       setStatus((error as Error).message, 'error');
     }
@@ -1770,6 +1830,7 @@ export function useChatOnlineApp() {
     setupForm,
     settingsForm,
     roomForm,
+    roomEditDialog,
     status,
     toast,
     showSetup,
@@ -1798,6 +1859,9 @@ export function useChatOnlineApp() {
     setImageInputElement,
     getRoomUserName,
     getRoomUserAvatar,
+    openRoomEditor,
+    closeRoomEditor,
+    updateRoomEditField,
     toggleSoundReminder,
     toggleChatHistoryStorage,
     selectRoomUser,
@@ -1806,6 +1870,7 @@ export function useChatOnlineApp() {
     submitSettings,
     logout,
     createRoom,
+    saveRoomSettings,
     copyShareUrl,
     deleteRoom,
     sendMessage,

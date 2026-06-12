@@ -51,6 +51,37 @@ test('访客文本消息只转发给管理员', () => {
   assert.equal(adminMessages[0].payload.text, '你好');
 });
 
+test('房间欢迎语只自动发送给新进入的访客', () => {
+  const relay = new ChatRelayService({ now: () => new Date('2026-06-10T12:00:00.123Z') });
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+  relay.connectAdmin('room-1', 'admin-1', adminSender);
+  const guest = relay.connectGuest('room-1', guestSender);
+
+  relay.sendWelcomeMessageToGuest('room-1', guest.connectionId, '欢迎咨询，请描述您的问题。');
+
+  const guestMessages = findEvents<{ event: string; from: { role: string }; payload: { text: string } }>(
+    guestSender,
+    'message:new'
+  );
+  const adminMessages = findEvents(adminSender, 'message:new');
+
+  assert.equal(guestMessages.length, 1);
+  assert.equal(guestMessages[0].from.role, 'admin');
+  assert.equal(guestMessages[0].payload.text, '欢迎咨询，请描述您的问题。');
+  assert.equal(adminMessages.length, 0);
+});
+
+test('空房间欢迎语不会自动发送', () => {
+  const relay = new ChatRelayService();
+  const guestSender = new MemorySender();
+  const guest = relay.connectGuest('room-1', guestSender);
+
+  relay.sendWelcomeMessageToGuest('room-1', guest.connectionId, '   ');
+
+  assert.equal(findEvents(guestSender, 'message:new').length, 0);
+});
+
 test('管理员消息只转发给指定访客', () => {
   const relay = new ChatRelayService();
   const adminSender = new MemorySender();

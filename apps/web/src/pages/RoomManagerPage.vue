@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import type { RoomInfo, StatusState } from '../types';
 
+type RoomEditDialogState = {
+  visible: boolean;
+  roomId: string;
+  remarkName: string;
+  welcomeMessage: string;
+};
+
 /**
  * 聊天室管理页。
- * 职责：展示房间统计、备注创建表单、房间列表和房间操作；关键参数为房间集合、房间表单、加载状态和全局提示；核心分支按房间 active/closed 状态控制展示文案。
+ * 职责：展示房间统计、新建入口、房间列表和编辑弹窗；关键参数为房间集合、弹窗草稿和全局提示；核心分支按弹窗是否打开决定是否展示编辑表单。
  */
 defineProps<{
   rooms: RoomInfo[];
   roomForm: { remarkName: string };
+  roomEditDialog: RoomEditDialogState;
   loadingRooms: boolean;
   copiedRoomId: string;
   activeRoomsCount: number;
@@ -17,9 +25,26 @@ defineProps<{
 const emit = defineEmits<{
   (event: 'logout'): void;
   (event: 'create-room'): void;
+  (event: 'open-room-editor', room: RoomInfo): void;
+  (event: 'close-room-editor'): void;
+  (event: 'update-room-edit-field', field: 'remarkName' | 'welcomeMessage', value: string): void;
+  (event: 'save-room-settings'): void;
   (event: 'copy-share-url', room: RoomInfo): void;
   (event: 'delete-room', roomId: string): void;
 }>();
+
+/**
+ * 转发编辑弹窗输入。
+ * @param field 房间设置字段；核心分支只允许备注和欢迎语两个字段，避免表单事件误写其他状态。
+ * @param event 输入事件。
+ */
+function updateEditField(field: 'remarkName' | 'welcomeMessage', event: Event): void {
+  const target = event.target;
+
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    emit('update-room-edit-field', field, target.value);
+  }
+}
 </script>
 
 <template>
@@ -39,7 +64,7 @@ const emit = defineEmits<{
       <div class="page-heading">
         <p class="eyebrow">聊天室管理</p>
         <h1>管理所有访客聊天室</h1>
-        <p>在这里新建房间、复制分享链接、删除房间。点击房间备注后进入独立聊天窗口。</p>
+        <p>在这里新建房间、复制分享链接、编辑房间设置或删除房间。点击房间备注后进入独立聊天窗口。</p>
       </div>
       <div class="metric-grid">
         <div class="metric-card">
@@ -86,6 +111,7 @@ const emit = defineEmits<{
             <span>{{ new Date(room.createdAt).toLocaleString('zh-CN', { hour12: false }) }}</span>
             <code>{{ room.shareUrl }}</code>
             <span class="row-actions">
+              <button class="secondary-button" type="button" @click="emit('open-room-editor', room)">编辑</button>
               <button class="secondary-button" type="button" @click="emit('copy-share-url', room)">
                 {{ copiedRoomId === room.id ? '已复制' : '复制' }}
               </button>
@@ -98,4 +124,41 @@ const emit = defineEmits<{
       <p class="status-text" :class="status.type" role="status">{{ status.message }}</p>
     </section>
   </main>
+
+  <Teleport to="body">
+    <div v-if="roomEditDialog.visible" class="modal-backdrop" role="presentation" @click.self="emit('close-room-editor')">
+      <form class="room-edit-modal" role="dialog" aria-modal="true" aria-labelledby="room-edit-title" @submit.prevent="emit('save-room-settings')">
+        <div class="modal-title-row">
+          <div>
+            <p class="eyebrow">房间设置</p>
+            <h2 id="room-edit-title">编辑聊天室</h2>
+          </div>
+          <button class="modal-close-button" type="button" aria-label="关闭编辑弹窗" @click="emit('close-room-editor')">×</button>
+        </div>
+        <label>
+          <span>备注名称</span>
+          <input
+            :value="roomEditDialog.remarkName"
+            maxlength="120"
+            placeholder="例如：售前咨询"
+            @input="updateEditField('remarkName', $event)"
+          />
+        </label>
+        <label>
+          <span>首次欢迎语</span>
+          <textarea
+            :value="roomEditDialog.welcomeMessage"
+            maxlength="1000"
+            rows="5"
+            placeholder="访客首次进入时自动收到，可留空"
+            @input="updateEditField('welcomeMessage', $event)"
+          ></textarea>
+        </label>
+        <div class="modal-action-row">
+          <button class="secondary-button" type="button" @click="emit('close-room-editor')">取消</button>
+          <button class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </Teleport>
 </template>

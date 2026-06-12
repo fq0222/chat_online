@@ -47,7 +47,8 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
     }
 
     const remarkName = typeof request.body?.remarkName === 'string' ? request.body.remarkName : '';
-    const result = await roomService.createRoom(session.adminId, remarkName);
+    const welcomeMessage = typeof request.body?.welcomeMessage === 'string' ? request.body.welcomeMessage : '';
+    const result = await roomService.createRoom(session.adminId, remarkName, welcomeMessage);
     logger.info(`聊天室创建成功：${result.room.id}`);
 
     response.status(201).json({
@@ -56,6 +57,7 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
         adminId: result.room.adminId,
         shareSlug: result.room.shareSlug,
         remarkName: result.room.remarkName,
+        welcomeMessage: result.room.welcomeMessage,
         status: result.room.status,
         createdAt: result.room.createdAt.toISOString()
       },
@@ -71,6 +73,27 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
       return;
     }
 
+    response.json({ room });
+  });
+
+  router.patch('/:roomId', async (request, response) => {
+    const session = await authService.verifyToken(getBearerToken(request.headers.authorization));
+
+    if (!session || session.isBootstrap) {
+      response.status(401).json({ message: '管理员未登录' });
+      return;
+    }
+
+    const remarkName = typeof request.body?.remarkName === 'string' ? request.body.remarkName : '';
+    const welcomeMessage = typeof request.body?.welcomeMessage === 'string' ? request.body.welcomeMessage : '';
+    const room = await roomService.updateRoomSettings(request.params.roomId, session.adminId, { remarkName, welcomeMessage });
+
+    if (!room) {
+      response.status(404).json({ message: '聊天室不存在' });
+      return;
+    }
+
+    logger.info(`聊天室配置已更新：${room.id}`);
     response.json({ room });
   });
 

@@ -452,7 +452,7 @@ textarea:focus {
 
 .room-row {
   display: grid;
-  grid-template-columns: 170px 100px 190px minmax(260px, 1fr) 170px;
+  grid-template-columns: 170px 100px 190px minmax(260px, 1fr) 230px;
   gap: 12px;
   align-items: center;
   min-height: 58px;
@@ -522,6 +522,76 @@ textarea:focus {
 .row-actions {
   display: flex;
   gap: 8px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.46);
+  padding: 24px;
+}
+
+.room-edit-modal {
+  display: grid;
+  gap: 18px;
+  width: min(560px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+  padding: 22px;
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.modal-title-row h2 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.modal-close-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.room-edit-modal label {
+  display: grid;
+  gap: 8px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.room-edit-modal textarea {
+  min-height: 132px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.modal-action-row {
+  display: flex;
+  justify-content: end;
+  gap: 10px;
 }
 
 .danger-button {

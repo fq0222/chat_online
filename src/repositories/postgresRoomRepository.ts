@@ -6,6 +6,7 @@ type RoomRow = {
   admin_id: string;
   share_slug: string;
   remark_name: string;
+  welcome_message: string;
   status: 'active' | 'closed';
   created_at: Date;
   updated_at: Date;
@@ -23,12 +24,12 @@ export class PostgresRoomRepository implements RoomRepository {
    * @param data 房间 ID、管理员 ID、分享标识、备注名称和状态。
    * @returns 创建后的房间记录。
    */
-  async createRoom(data: { id: string; adminId: string; shareSlug: string; remarkName: string; status: 'active' }): Promise<RoomRecord> {
+  async createRoom(data: { id: string; adminId: string; shareSlug: string; remarkName: string; welcomeMessage: string; status: 'active' }): Promise<RoomRecord> {
     const result = await this.pool.query<RoomRow>(
-      `INSERT INTO rooms (id, admin_id, share_slug, remark_name, status)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO rooms (id, admin_id, share_slug, remark_name, welcome_message, status)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [data.id, data.adminId, data.shareSlug, data.remarkName, data.status]
+      [data.id, data.adminId, data.shareSlug, data.remarkName, data.welcomeMessage, data.status]
     );
     return this.mapRow(result.rows[0]);
   }
@@ -63,6 +64,26 @@ export class PostgresRoomRepository implements RoomRepository {
    */
   async findByShareSlug(shareSlug: string): Promise<RoomRecord | null> {
     const result = await this.pool.query<RoomRow>('SELECT * FROM rooms WHERE share_slug = $1 LIMIT 1', [shareSlug]);
+    return result.rows[0] ? this.mapRow(result.rows[0]) : null;
+  }
+
+  /**
+   * 更新管理员自己的房间配置。
+   * @param id 房间 ID。
+   * @param adminId 管理员 ID；核心分支限制只更新自己创建的房间。
+   * @param data 可更新配置；remarkName 和 welcomeMessage 都可独立保存为空字符串。
+   * @returns 更新后的房间记录；房间不存在或不属于该管理员时返回 null。
+   */
+  async updateRoom(id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string }): Promise<RoomRecord | null> {
+    const result = await this.pool.query<RoomRow>(
+      `UPDATE rooms
+       SET remark_name = COALESCE($3, remark_name),
+           welcome_message = COALESCE($4, welcome_message),
+           updated_at = NOW()
+       WHERE id = $1 AND admin_id = $2
+       RETURNING *`,
+      [id, adminId, data.remarkName, data.welcomeMessage]
+    );
     return result.rows[0] ? this.mapRow(result.rows[0]) : null;
   }
 
@@ -105,6 +126,7 @@ export class PostgresRoomRepository implements RoomRepository {
       adminId: row.admin_id,
       shareSlug: row.share_slug,
       remarkName: row.remark_name,
+      welcomeMessage: row.welcome_message,
       status: row.status,
       createdAt: row.created_at,
       updatedAt: row.updated_at
