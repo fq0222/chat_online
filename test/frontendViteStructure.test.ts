@@ -83,6 +83,7 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(viteConfig, /proxy:\s*{/);
   assert.match(viteConfig, /['"]\/api['"]/);
   assert.match(viteConfig, /['"]\/ws\/chat['"]/);
+  assert.match(viteConfig, /['"]\/ws\/media['"]/);
   assert.match(frontEndSource, /\/admin\/settings/);
   assert.match(frontEndSource, /\/admin\/rooms/);
   assert.match(frontEndSource, /\/admin\/chat\?roomId=/);
@@ -181,4 +182,17 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.doesNotMatch(frontEndSource, /:disabled="!activeGuestId"/);
   assert.doesNotMatch(frontEndSource, /:disabled="!guestRoom"/);
   assert.match(frontEndSource, /登录已失效/);
+});
+
+test('后端必须挂载独立图片媒体 WebSocket 通道', () => {
+  const mediaServer = fs.readFileSync(path.join(root, 'src/ws/mediaServer.ts'), 'utf8');
+  const chatServer = fs.readFileSync(path.join(root, 'src/ws/chatServer.ts'), 'utf8');
+  const serverTs = fs.readFileSync(path.join(root, 'src/server.ts'), 'utf8');
+
+  assert.match(mediaServer, /url\.pathname !== '\/ws\/media'/);
+  assert.match(mediaServer, /chatMediaRelayService/);
+  assert.match(mediaServer, /connectionId/);
+  assert.match(chatServer, /connection:ready/);
+  assert.match(serverTs, /attachMediaServer/);
+  assert.match(serverTs, /new ChatMediaRelayService/);
 });

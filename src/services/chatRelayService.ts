@@ -129,6 +129,17 @@ export class ChatRelayService {
   }
 
   /**
+   * 查询当前控制通道连接。
+   * @param connectionId 控制通道连接 ID；核心分支为媒体通道握手校验提供同房间、同角色的连接摘要。
+   * @returns 连接在线时返回公开连接摘要，否则返回 null。
+   */
+  getConnection(connectionId: string): RelayConnection | null {
+    const connection = this.connections.get(connectionId);
+
+    return connection ? this.toPublicConnection(connection) : null;
+  }
+
+  /**
    * 处理客户端消息并转发给目标连接。
    * @param connectionId 发送方连接 ID。
    * @param message 客户端消息，支持 text、image 和 image:start。

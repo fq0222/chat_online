@@ -66,6 +66,8 @@ export function attachChatServer(
         ? dependencies.chatRelayService.connectAdmin(context.roomId, context.adminSession.adminId, sender)
         : dependencies.chatRelayService.connectGuest(context.roomId, sender);
 
+    socket.send(JSON.stringify({ event: 'connection:ready', connection }));
+
     socket.on('message', (rawMessage) => {
       try {
         const message = JSON.parse(rawMessage.toString()) as ClientMessage;
