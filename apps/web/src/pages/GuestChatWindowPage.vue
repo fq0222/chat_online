@@ -71,10 +71,17 @@ function updateMessageInput(event: Event): void {
           <span v-if="message.from === 'admin'" class="avatar">管</span>
           <div class="message-body">
             <span class="message-time">{{ message.time }}</span>
-            <div class="message-bubble" :class="{ image: message.imageUrl }">
+            <div class="message-bubble" :class="{ image: message.imageUrl || message.imageStatus }">
               <button v-if="message.imageUrl" class="message-image-button" type="button" @click="emit('open-image-preview', message)">
                 <img class="message-image" :src="message.imageUrl" :alt="message.text" />
               </button>
+              <div v-else-if="message.imageStatus === 'loading'" class="message-image-placeholder">
+                <img v-if="message.previewUrl" class="message-image preview" :src="message.previewUrl" :alt="message.text" />
+                <span class="image-progress">图片加载中 {{ message.imageProgress ?? 0 }}%</span>
+              </div>
+              <div v-else-if="message.imageStatus === 'failed'" class="message-image-placeholder failed">
+                <span>图片加载失败</span>
+              </div>
               <template v-else>{{ message.text }}</template>
             </div>
           </div>

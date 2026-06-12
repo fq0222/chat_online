@@ -987,6 +987,46 @@ textarea:focus {
   object-fit: contain;
 }
 
+.message-image-placeholder {
+  position: relative;
+  display: grid;
+  width: min(240px, 64vw);
+  aspect-ratio: 4 / 3;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #e5e7eb;
+  color: #475569;
+  font-size: 13px;
+}
+
+.message-image-placeholder.failed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.message-image.preview {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: cover;
+  opacity: 0.72;
+}
+
+.image-progress {
+  position: absolute;
+  max-width: calc(100% - 20px);
+  overflow-wrap: anywhere;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.35;
+  padding: 4px 8px;
+  text-align: center;
+}
+
 .image-viewer {
   position: fixed;
   inset: 0;

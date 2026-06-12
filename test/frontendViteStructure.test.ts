@@ -126,6 +126,8 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /image:start/);
   assert.match(frontEndSource, /image:chunk/);
   assert.doesNotMatch(frontEndSource, /type:\s*'image'[\s\S]*dataUrl:\s*image\.dataUrl/);
+  assert.match(frontEndSource, /imageStatus === 'loading'/);
+  assert.match(frontEndSource, /image-progress/);
   assert.match(frontEndSource, /message-image/);
   assert.match(frontEndSource, /previewImage/);
   assert.match(frontEndSource, /openImagePreview/);
@@ -134,6 +136,8 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /class="image-viewer"/);
   assert.match(stylesCss, /\.image-viewer\s*{[^}]*position:\s*fixed/s);
   assert.match(stylesCss, /\.image-viewer-image\s*{[^}]*width:\s*auto[^}]*height:\s*auto/s);
+  assert.match(stylesCss, /\.image-progress/);
+  assert.match(stylesCss, /\.message-image-placeholder/);
   assert.doesNotMatch(frontEndSource, /guest-room-info/);
   assert.doesNotMatch(frontEndSource, /请在这里发送消息，客服在线时会实时回复。/);
   assert.match(frontEndSource, /:ref="setMessageTimelineElement" class="message-timeline guest-timeline"/);
