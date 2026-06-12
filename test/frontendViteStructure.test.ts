@@ -113,7 +113,9 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /accept="image\/\*"/);
   assert.match(frontEndSource, /handleImageSelect/);
   assert.match(frontEndSource, /handleComposerPaste/);
-  assert.match(frontEndSource, /readImageFileAsDataUrl/);
+  assert.match(frontEndSource, /compressImageFileForChat/);
+  assert.match(frontEndSource, /createFrontendLogger/);
+  assert.match(frontEndSource, /图片压缩完成/);
   assert.match(frontEndSource, /type:\s*'image'/);
   assert.match(frontEndSource, /message-image/);
   assert.match(frontEndSource, /previewImage/);

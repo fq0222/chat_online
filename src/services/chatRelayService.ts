@@ -41,6 +41,19 @@ type ChatRelayOptions = {
 };
 
 /**
+ * 格式化图片载荷体积。
+ * @param bytes 字节数；核心分支为超过 1MB 时输出 MB，否则输出 KB。
+ * @returns 面向日志的体积文本。
+ */
+function formatPayloadBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / 1024 / 1024).toFixed(2)}MB`;
+  }
+
+  return `${Math.max(1, Math.round(bytes / 1024))}KB`;
+}
+
+/**
  * 聊天消息转发服务。
  * 职责：维护在线连接并实时转发消息；关键参数为连接 ID、房间 ID 和客户端消息；核心分支为管理员发访客、访客发管理员和目标离线。
  */
@@ -108,10 +121,18 @@ export class ChatRelayService {
    * @param message 客户端消息，支持 text 和 image。
    */
   handleClientMessage(connectionId: string, message: ClientMessage): void {
+    const startedAt = Date.now();
     const sender = this.connections.get(connectionId);
 
     if (!sender) {
       return;
+    }
+
+    if (message.type === 'image') {
+      logger.info(
+        `图片消息开始处理：${sender.roomId} ${sender.role} ${message.payload.mimeType} ` +
+          `载荷 ${formatPayloadBytes(Buffer.byteLength(message.payload.dataUrl, 'utf8'))}`
+      );
     }
 
     const error = this.validateMessage(message);
@@ -145,6 +166,11 @@ export class ChatRelayService {
 
     target.sender.send(JSON.stringify(relayMessage));
     this.sendEvent(sender, 'message:ack', { clientMessageId: message.clientMessageId });
+
+    if (message.type === 'image') {
+      logger.info(`图片消息转发完成：${sender.roomId} ${sender.role} 耗时 ${Date.now() - startedAt}ms`);
+    }
+
     logger.info(`消息转发成功：${sender.roomId} ${message.type} ${sender.role}`);
   }
 

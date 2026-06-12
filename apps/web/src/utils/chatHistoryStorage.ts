@@ -33,6 +33,26 @@ function isChatMessage(value: unknown): value is ChatMessage {
 }
 
 /**
+ * 生成适合写入浏览器缓存的聊天消息快照。
+ * @param messages 当前完整聊天消息；核心分支为图片消息移除原始 dataURL，避免 localStorage 同步写入大体积内容。
+ * @returns 可安全写入缓存的聊天消息列表。
+ */
+export function createChatHistorySnapshot(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((message) => {
+    if (!message.imageUrl) {
+      return message;
+    }
+
+    return {
+      from: message.from,
+      text: message.text,
+      time: message.time,
+      mimeType: message.mimeType
+    };
+  });
+}
+
+/**
  * 创建聊天记录缓存读写器。
  * @param options 浏览器缓存实例与键名；核心分支按 enabledKey 控制写入，并按 historyKey 隔离不同聊天窗口记录。
  * @returns 聊天记录缓存操作集合。
@@ -88,7 +108,7 @@ export function createChatHistoryStorage(options: ChatHistoryStorageOptions) {
       }
 
       try {
-        storage.setItem(historyKey, JSON.stringify(messages));
+        storage.setItem(historyKey, JSON.stringify(createChatHistorySnapshot(messages)));
         return true;
       } catch {
         return false;

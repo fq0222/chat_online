@@ -61,3 +61,32 @@ test('聊天记录缓存关闭时不会写入新消息', () => {
   assert.equal(saved, false);
   assert.equal(storage.getItem('chat-history-room-a'), null);
 });
+
+test('聊天记录缓存写入图片消息时不保存原始 dataURL', () => {
+  const storage = new MemoryStorage();
+  const chatHistoryStorage = createChatHistoryStorage({
+    storage,
+    enabledKey: 'chat-history-enabled',
+    historyKey: 'chat-history-room-a'
+  });
+  const imageMessage: ChatMessage = {
+    from: 'guest',
+    text: '[图片消息]',
+    time: '2026/6/12 10:00:00',
+    imageUrl: 'data:image/png;base64,very-large-image-body',
+    mimeType: 'image/png'
+  };
+
+  chatHistoryStorage.setEnabled(true, [imageMessage]);
+
+  const rawHistory = storage.getItem('chat-history-room-a') ?? '';
+  assert.doesNotMatch(rawHistory, /very-large-image-body/);
+  assert.deepEqual(chatHistoryStorage.read(), [
+    {
+      from: 'guest',
+      text: '[图片消息]',
+      time: '2026/6/12 10:00:00',
+      mimeType: 'image/png'
+    }
+  ]);
+});

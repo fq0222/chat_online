@@ -59,6 +59,11 @@ export type PendingImage = {
   dataUrl: string;
   mimeType: string;
   name: string;
+  originalBytes?: number;
+  compressedBytes?: number;
+  width?: number;
+  height?: number;
+  compressionDurationMs?: number;
 };
 
 export type PreviewImage = {

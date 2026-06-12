@@ -2,6 +2,8 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import { createDraftSendQueue } from '../utils/chatDraftOrder';
 import { createChatHistoryStorage } from '../utils/chatHistoryStorage';
+import { createFrontendLogger } from '../utils/frontendLogger';
+import { compressImageFileForChat, readBlobAsDataUrl } from '../utils/imageCompression';
 import { getPageTitle } from '../utils/pageTitle';
 import { isPageActive, playIncomingMessageSound, shouldPlayIncomingMessageSound } from '../utils/messageSound';
 import { createReconnectPolicy } from '../utils/websocketReconnect';
@@ -25,6 +27,7 @@ import type {
  * @returns 页面组件需要的状态、派生数据和事件处理器；核心分支按登录、房间管理、管理端聊天和访客聊天区分。
  */
 export function useChatOnlineApp() {
+  const imageLogger = createFrontendLogger('图片发送');
   const storageKeys = {
     token: 'chatOnline.adminToken',
     admin: 'chatOnline.admin',
@@ -534,30 +537,6 @@ export function useChatOnlineApp() {
   }
 
   /**
-   * 读取图片文件为 dataURL。
-   * @param file 本地图片文件；核心分支为 FileReader 成功时返回 dataURL，读取失败时抛出错误。
-   * @returns 可直接展示和转发的 dataURL 字符串。
-   */
-  function readImageFileAsDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-
-      reader.addEventListener('load', () => {
-        if (typeof reader.result === 'string') {
-          resolve(reader.result);
-          return;
-        }
-
-        reject(new Error('图片读取失败，请重新选择。'));
-      });
-      reader.addEventListener('error', () => {
-        reject(new Error('图片读取失败，请重新选择。'));
-      });
-      reader.readAsDataURL(file);
-    });
-  }
-
-  /**
    * 校验本地图片文件。
    * @param file 本地文件；核心分支限制图片格式和大小，与后端图片转发校验保持一致。
    * @returns 校验失败文案，校验通过时返回空字符串。
@@ -572,6 +551,32 @@ export function useChatOnlineApp() {
     }
 
     return '';
+  }
+
+  /**
+   * 格式化图片体积，便于日志排查压缩收益。
+   * @param bytes 字节数；核心分支为超过 1MB 时输出 MB，否则输出 KB。
+   * @returns 面向日志的体积文本。
+   */
+  function formatByteSize(bytes: number): string {
+    if (bytes <= 0) {
+      return '0KB';
+    }
+
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / 1024 / 1024).toFixed(2)}MB`;
+    }
+
+    return `${Math.max(1, Math.round(bytes / 1024))}KB`;
+  }
+
+  /**
+   * 计算字符串的 UTF-8 字节数。
+   * @param value 待发送字符串；核心分支优先使用 Blob 精确计算浏览器发送载荷大小。
+   * @returns UTF-8 字节数。
+   */
+  function getUtf8ByteLength(value: string): number {
+    return new Blob([value]).size;
   }
 
   /**
@@ -592,13 +597,50 @@ export function useChatOnlineApp() {
     }
 
     try {
-      const dataUrl = await readImageFileAsDataUrl(file);
+      let image: PendingImage;
+
+      try {
+        const compressedImage = await compressImageFileForChat(file);
+
+        if (compressedImage.compressedBytes > maxImageBytes) {
+          setStatus('图片压缩后仍超过 5MB，请换一张更小的图片。', 'error');
+          imageLogger.warn(
+            `图片压缩后仍超过限制：${file.name || '未命名'} ${formatByteSize(file.size)} -> ${formatByteSize(compressedImage.compressedBytes)}`
+          );
+          return;
+        }
+
+        image = {
+          dataUrl: compressedImage.dataUrl,
+          mimeType: compressedImage.mimeType,
+          name: file.name || '待发送图片',
+          originalBytes: compressedImage.originalBytes,
+          compressedBytes: compressedImage.compressedBytes,
+          width: compressedImage.width,
+          height: compressedImage.height,
+          compressionDurationMs: compressedImage.durationMs
+        };
+        imageLogger.info(
+          `图片压缩完成：${image.name} ${formatByteSize(compressedImage.originalBytes)} -> ${formatByteSize(compressedImage.compressedBytes)} ` +
+            `${compressedImage.width}x${compressedImage.height} ${compressedImage.durationMs}ms`
+        );
+      } catch (compressionError) {
+        imageLogger.warn(`图片压缩失败，回退原图发送：${file.name || '未命名'} ${(compressionError as Error).message}`);
+        image = {
+          dataUrl: await readBlobAsDataUrl(file),
+          mimeType: file.type,
+          name: file.name || '待发送图片',
+          originalBytes: file.size,
+          compressedBytes: file.size
+        };
+      }
+
       if (pendingImages.value.length >= maxPendingImages) {
         setStatus(`每次最多发送 ${maxPendingImages} 张图片。`, 'error');
         return;
       }
 
-      pendingImages.value = [...pendingImages.value, { dataUrl, mimeType: file.type, name: file.name || '待发送图片' }];
+      pendingImages.value = [...pendingImages.value, image];
     } catch (readError) {
       setStatus((readError as Error).message, 'error');
     }
@@ -650,25 +692,28 @@ export function useChatOnlineApp() {
    * @param image 图片草稿；核心分支为访客发给管理员，管理员发给当前选中的访客。
    */
   function sendPendingImage(image: PendingImage): void {
-      if (page.value === 'guest-chat') {
-        chatMessages.value.push({
-          from: 'guest',
-          text: '[图片消息]',
-          time: formatMessageTime(),
-          imageUrl: image.dataUrl,
-          mimeType: image.mimeType
-        });
-        persistGuestChatHistory(guestRoom.value?.id ?? '');
-        scrollToLatestReadMessage();
+    if (page.value === 'guest-chat') {
+      chatMessages.value.push({
+        from: 'guest',
+        text: '[图片消息]',
+        time: formatMessageTime(),
+        imageUrl: image.dataUrl,
+        mimeType: image.mimeType
+      });
+      persistGuestChatHistory(guestRoom.value?.id ?? '');
+      scrollToLatestReadMessage();
 
-        if (socketRef.value?.readyState === WebSocket.OPEN) {
-        socketRef.value.send(
-          JSON.stringify({
-            type: 'image',
-            clientMessageId: `guest-image-${Date.now()}`,
-            payload: { mimeType: image.mimeType, dataUrl: image.dataUrl }
-          })
+      if (socketRef.value?.readyState === WebSocket.OPEN) {
+        const payload = JSON.stringify({
+          type: 'image',
+          clientMessageId: `guest-image-${Date.now()}`,
+          payload: { mimeType: image.mimeType, dataUrl: image.dataUrl }
+        });
+        imageLogger.info(
+          `访客图片开始发送：${image.name} 载荷 ${formatByteSize(getUtf8ByteLength(payload))} ` +
+            `原始 ${formatByteSize(image.originalBytes ?? 0)} 压缩 ${formatByteSize(image.compressedBytes ?? image.dataUrl.length)}`
         );
+        socketRef.value.send(payload);
       }
 
       return;
@@ -681,14 +726,17 @@ export function useChatOnlineApp() {
     const targetGuestId = selectedGuestId.value;
 
     if (socketRef.value?.readyState === WebSocket.OPEN && targetGuestId) {
-      socketRef.value.send(
-        JSON.stringify({
-          type: 'image',
-          clientMessageId: `admin-image-${Date.now()}`,
-          targetConnectionId: targetGuestId,
-          payload: { mimeType: image.mimeType, dataUrl: image.dataUrl }
-        })
+      const payload = JSON.stringify({
+        type: 'image',
+        clientMessageId: `admin-image-${Date.now()}`,
+        targetConnectionId: targetGuestId,
+        payload: { mimeType: image.mimeType, dataUrl: image.dataUrl }
+      });
+      imageLogger.info(
+        `客服图片开始发送：${image.name} 载荷 ${formatByteSize(getUtf8ByteLength(payload))} ` +
+          `原始 ${formatByteSize(image.originalBytes ?? 0)} 压缩 ${formatByteSize(image.compressedBytes ?? image.dataUrl.length)}`
       );
+      socketRef.value.send(payload);
     }
   }
 
@@ -1129,6 +1177,7 @@ export function useChatOnlineApp() {
         users?: RelayRoomUser[];
         payload?: { text?: string; mimeType?: string; dataUrl?: string };
         message?: string;
+        clientMessageId?: string;
       };
 
       if (data.event === 'room:users' && data.users) {
@@ -1141,11 +1190,21 @@ export function useChatOnlineApp() {
         return;
       }
 
+      if (data.event === 'message:ack') {
+        imageLogger.info(`服务端已确认消息：${data.clientMessageId ?? '未提供客户端消息 ID'}`);
+        return;
+      }
+
       if (data.event !== 'message:new' || !data.from) {
         return;
       }
 
       const sentAt = data.sentAt ? new Date(data.sentAt) : new Date();
+      if (data.type === 'image') {
+        imageLogger.info(
+          `客服端收到访客图片：${data.payload?.mimeType ?? '未知类型'} ${formatByteSize(getUtf8ByteLength(data.payload?.dataUrl ?? ''))}`
+        );
+      }
       notifyIncomingMessage(activeGuestId.value === data.from.connectionId);
       appendAdminConversationMessage(data.from, {
         from: 'guest',
@@ -1192,6 +1251,7 @@ export function useChatOnlineApp() {
         sentAt?: string;
         payload?: { text?: string; mimeType?: string; dataUrl?: string };
         message?: string;
+        clientMessageId?: string;
       };
 
       if (data.event === 'message:error') {
@@ -1199,10 +1259,20 @@ export function useChatOnlineApp() {
         return;
       }
 
+      if (data.event === 'message:ack') {
+        imageLogger.info(`服务端已确认消息：${data.clientMessageId ?? '未提供客户端消息 ID'}`);
+        return;
+      }
+
       if (data.event !== 'message:new') {
         return;
       }
 
+      if (data.type === 'image') {
+        imageLogger.info(
+          `访客端收到客服图片：${data.payload?.mimeType ?? '未知类型'} ${formatByteSize(getUtf8ByteLength(data.payload?.dataUrl ?? ''))}`
+        );
+      }
       chatMessages.value.push({
         from: 'admin',
         text: data.payload?.text ?? '[图片消息]',
