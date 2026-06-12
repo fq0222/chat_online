@@ -14,13 +14,13 @@ const secondImage: PendingImage = {
   name: 'second.webp'
 };
 
-test('发送草稿同时包含图片和文字时图片排在文字前面', () => {
+test('发送草稿同时包含图片和文字时文字排在图片前面', () => {
   const queue = createDraftSendQueue('  文字消息  ', [firstImage, secondImage]);
 
   assert.deepEqual(queue, [
+    { type: 'text', text: '文字消息' },
     { type: 'image', image: firstImage },
-    { type: 'image', image: secondImage },
-    { type: 'text', text: '文字消息' }
+    { type: 'image', image: secondImage }
   ]);
 });
 

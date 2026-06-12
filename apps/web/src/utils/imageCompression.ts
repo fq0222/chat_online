@@ -40,10 +40,10 @@ export type CompressedChatImage = {
 };
 
 const defaultCompressionOptions: ImageCompressionOptions = {
-  maxWidth: 1600,
-  maxHeight: 1600,
+  maxWidth: 960,
+  maxHeight: 960,
   outputMimeType: 'image/webp',
-  quality: 0.72
+  quality: 0.58
 };
 
 /**
@@ -107,6 +107,16 @@ function createCompressedBlob(canvas: ImageCanvasLike, mimeType: string, quality
       reject(new Error('图片压缩失败，请重新选择。'));
     }, mimeType, quality);
   });
+}
+
+/**
+ * 判断浏览器输出是否符合请求的图片格式。
+ * @param blob 浏览器压缩后的二进制结果。
+ * @param requestedMimeType 请求输出的 MIME 类型；核心分支为 Safari 等浏览器可能回退 PNG，需要识别后再兜底。
+ * @returns true 表示浏览器实际输出格式符合请求。
+ */
+function isExpectedOutputMimeType(blob: Blob, requestedMimeType: string): boolean {
+  return !blob.type || blob.type === requestedMimeType;
 }
 
 /**
@@ -176,7 +186,11 @@ export async function compressImageFileForChat(
     }
 
     context.drawImage(bitmap, 0, 0, dimensions.width, dimensions.height);
-    const compressedBlob = await createCompressedBlob(canvas, compressionOptions.outputMimeType, compressionOptions.quality);
+    const primaryBlob = await createCompressedBlob(canvas, compressionOptions.outputMimeType, compressionOptions.quality);
+    const compressedBlob =
+      compressionOptions.outputMimeType === 'image/webp' && !isExpectedOutputMimeType(primaryBlob, compressionOptions.outputMimeType)
+        ? await createCompressedBlob(canvas, 'image/jpeg', compressionOptions.quality)
+        : primaryBlob;
     const dataUrl = await deps.readAsDataUrl(compressedBlob);
 
     return {
