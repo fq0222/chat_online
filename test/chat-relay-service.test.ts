@@ -93,6 +93,76 @@ test('图片消息校验 MIME 和大小后转发', () => {
   assert.equal(findEvents(guestSender, 'message:error').length, 1);
 });
 
+test('图片开始事件只转发元数据和预览图且不包含完整图片正文', () => {
+  const relay = new ChatRelayService();
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+  relay.connectAdmin('room-1', 'admin-1', adminSender);
+  const guest = relay.connectGuest('room-1', guestSender);
+
+  relay.handleClientMessage(guest.connectionId, {
+    type: 'image:start',
+    clientMessageId: 'img-start-1',
+    payload: {
+      imageId: 'image-1',
+      mimeType: 'image/png',
+      size: 12345,
+      chunkSize: 4096,
+      totalChunks: 4,
+      previewDataUrl: 'data:image/png;base64,cHJldmlldw==',
+      dataUrl: 'data:image/png;base64,full-image'
+    }
+  } as unknown as ClientMessage);
+
+  const adminMessages = findEvents<{
+    event: string;
+    type: string;
+    payload: { previewDataUrl: string; dataUrl?: string };
+  }>(adminSender, 'message:new');
+
+  assert.equal(adminMessages.length, 1);
+  assert.equal(adminMessages[0].type, 'image:start');
+  assert.equal(adminMessages[0].payload.previewDataUrl, 'data:image/png;base64,cHJldmlldw==');
+  assert.equal(Object.hasOwn(adminMessages[0].payload, 'dataUrl'), false);
+});
+
+test('图片开始事件不阻塞后续文字消息转发', () => {
+  const relay = new ChatRelayService();
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+  relay.connectAdmin('room-1', 'admin-1', adminSender);
+  const guest = relay.connectGuest('room-1', guestSender);
+
+  relay.handleClientMessage(guest.connectionId, {
+    type: 'image:start',
+    clientMessageId: 'img-start-2',
+    payload: {
+      imageId: 'image-2',
+      mimeType: 'image/jpeg',
+      size: 8192,
+      chunkSize: 4096,
+      totalChunks: 2,
+      previewDataUrl: 'data:image/jpeg;base64,cHJldmlldw=='
+    }
+  });
+  relay.handleClientMessage(guest.connectionId, {
+    type: 'text',
+    clientMessageId: 'text-after-image-start',
+    payload: { text: '图片还在传，这条文字要先到' }
+  });
+
+  const adminMessages = findEvents<{ event: string; type: string; payload: { text?: string } }>(
+    adminSender,
+    'message:new'
+  );
+
+  assert.deepEqual(
+    adminMessages.map((message) => message.type),
+    ['image:start', 'text']
+  );
+  assert.equal(adminMessages[1].payload.text, '图片还在传，这条文字要先到');
+});
+
 test('默认允许发送 5MB 以内图片并拒绝超过限制的图片', () => {
   const relay = new ChatRelayService();
   const adminSender = new MemorySender();

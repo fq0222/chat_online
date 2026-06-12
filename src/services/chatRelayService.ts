@@ -3,7 +3,7 @@ import { createLogger } from '../utils/logger';
 
 const logger = createLogger('聊天转发');
 
-export type MessageType = 'text' | 'image';
+export type MessageType = 'text' | 'image' | 'image:start';
 
 export type ClientMessage =
   | {
@@ -17,6 +17,19 @@ export type ClientMessage =
       clientMessageId: string;
       targetConnectionId?: string;
       payload: { mimeType: string; dataUrl: string };
+    }
+  | {
+      type: 'image:start';
+      clientMessageId: string;
+      targetConnectionId?: string;
+      payload: {
+        imageId: string;
+        mimeType: string;
+        size: number;
+        chunkSize: number;
+        totalChunks: number;
+        previewDataUrl: string;
+      };
     };
 
 export type RelayConnection = {
@@ -118,7 +131,7 @@ export class ChatRelayService {
   /**
    * 处理客户端消息并转发给目标连接。
    * @param connectionId 发送方连接 ID。
-   * @param message 客户端消息，支持 text 和 image。
+   * @param message 客户端消息，支持 text、image 和 image:start。
    */
   handleClientMessage(connectionId: string, message: ClientMessage): void {
     const startedAt = Date.now();
@@ -132,6 +145,11 @@ export class ChatRelayService {
       logger.info(
         `图片消息开始处理：${sender.roomId} ${sender.role} ${message.payload.mimeType} ` +
           `载荷 ${formatPayloadBytes(Buffer.byteLength(message.payload.dataUrl, 'utf8'))}`
+      );
+    } else if (message.type === 'image:start') {
+      logger.info(
+        `图片开始控制消息：${sender.roomId} ${sender.role} ${message.payload.mimeType} ` +
+          `图片 ${formatPayloadBytes(message.payload.size)} 分片 ${message.payload.totalChunks}`
       );
     }
 
@@ -161,7 +179,7 @@ export class ChatRelayService {
       to: this.toPublicConnection(target),
       clientMessageId: message.clientMessageId,
       sentAt: this.now().toISOString(),
-      payload: message.payload
+      payload: this.createRelayPayload(message)
     };
 
     target.sender.send(JSON.stringify(relayMessage));
@@ -169,6 +187,8 @@ export class ChatRelayService {
 
     if (message.type === 'image') {
       logger.info(`图片消息转发完成：${sender.roomId} ${sender.role} 耗时 ${Date.now() - startedAt}ms`);
+    } else if (message.type === 'image:start') {
+      logger.info(`图片开始控制消息转发完成：${sender.roomId} ${sender.role} 耗时 ${Date.now() - startedAt}ms`);
     }
 
     logger.info(`消息转发成功：${sender.roomId} ${message.type} ${sender.role}`);
@@ -220,6 +240,36 @@ export class ChatRelayService {
       return message.payload.text.trim() ? null : '文本消息不能为空';
     }
 
+    if (message.type === 'image:start') {
+      const { imageId, mimeType, size, chunkSize, totalChunks } = message.payload;
+
+      if (!imageId.trim()) {
+        return '图片 ID 不能为空';
+      }
+
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) {
+        return '图片类型不支持';
+      }
+
+      if (!Number.isSafeInteger(size) || size <= 0 || size > this.maxImageBytes) {
+        return '图片大小超过限制';
+      }
+
+      if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0 || chunkSize > 64 * 1024) {
+        return '图片分片大小不合法';
+      }
+
+      if (!Number.isSafeInteger(totalChunks) || totalChunks <= 0) {
+        return '图片分片数量不合法';
+      }
+
+      if (Math.ceil(size / chunkSize) !== totalChunks) {
+        return '图片分片数量不匹配';
+      }
+
+      return null;
+    }
+
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(message.payload.mimeType)) {
       return '图片类型不支持';
     }
@@ -232,6 +282,21 @@ export class ChatRelayService {
     }
 
     return null;
+  }
+
+  /**
+   * 构造允许转发给对端的消息载荷。
+   * @param message 客户端消息；核心分支为 image:start 只保留占位元数据，避免运行时夹带完整图片正文。
+   * @returns 可安全转发的消息载荷。
+   */
+  private createRelayPayload(message: ClientMessage): ClientMessage['payload'] {
+    if (message.type === 'image:start') {
+      const { imageId, mimeType, size, chunkSize, totalChunks, previewDataUrl } = message.payload;
+
+      return { imageId, mimeType, size, chunkSize, totalChunks, previewDataUrl };
+    }
+
+    return message.payload;
   }
 
   private sendEvent(connection: InternalConnection, event: string, payload: Record<string, unknown>): void {
