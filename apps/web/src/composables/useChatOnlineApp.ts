@@ -35,7 +35,8 @@ export function useChatOnlineApp() {
     admin: 'chatOnline.admin',
     soundReminder: 'chatOnline.soundReminderEnabled',
     guestChatHistoryEnabled: 'chatOnline.guestChatHistoryEnabled',
-    guestChatHistoryPrefix: 'chatOnline.guestChatHistory'
+    guestChatHistoryPrefix: 'chatOnline.guestChatHistory',
+    guestIdentityPrefix: 'chatOnline.guestIdentity'
   };
   const supportedImageMimeTypes = ['image/png', 'image/jpeg', 'image/webp'];
   const maxImageBytes = 1024 * 1024 * 5;
@@ -251,8 +252,8 @@ export function useChatOnlineApp() {
       return right.lastMessageAtMs - left.lastMessageAtMs;
     })
   );
-  const activeRoomUser = computed(() => roomUsers.value.find((user) => user.connectionId === activeGuestId.value) ?? null);
-  const selectedGuestId = computed(() => (activeRoomUser.value?.role === 'guest' ? activeGuestId.value : ''));
+  const activeRoomUser = computed(() => roomUsers.value.find((user) => getRoomUserConversationKey(user) === activeGuestId.value) ?? null);
+  const selectedGuestId = computed(() => (activeRoomUser.value?.role === 'guest' ? activeRoomUser.value.connectionId : ''));
   const activeConversationMessages = computed(() =>
     page.value === 'chat' && activeGuestId.value ? roomConversations.value[activeGuestId.value] ?? [] : chatMessages.value
   );
@@ -268,6 +269,15 @@ export function useChatOnlineApp() {
    */
   function formatMessageTime(date = new Date()): string {
     return date.toLocaleString('zh-CN', { hour12: false });
+  }
+
+  /**
+   * 获取管理端会话聚合键。
+   * @param user 房间用户摘要；核心分支为访客优先使用浏览器稳定会话 ID，管理员和旧连接回退到连接 ID。
+   * @returns 用于左侧高亮、未读数和会话消息缓存的键。
+   */
+  function getRoomUserConversationKey(user: Pick<RelayRoomUser, 'connectionId' | 'role' | 'guestSessionId'>): string {
+    return user.role === 'guest' ? user.guestSessionId ?? user.connectionId : user.connectionId;
   }
 
   /**
@@ -297,7 +307,8 @@ export function useChatOnlineApp() {
    * @param user 实时服务下发的用户摘要；核心分支会保留已有未读数和最近消息时间。
    */
   function upsertRoomUser(user: RelayRoomUser): void {
-    const current = roomUsers.value.find((item) => item.connectionId === user.connectionId);
+    const conversationKey = getRoomUserConversationKey(user);
+    const current = roomUsers.value.find((item) => getRoomUserConversationKey(item) === conversationKey);
     const next: RoomUser = {
       ...user,
       unreadCount: current?.unreadCount ?? 0,
@@ -307,7 +318,7 @@ export function useChatOnlineApp() {
     };
 
     roomUsers.value = current
-      ? roomUsers.value.map((item) => (item.connectionId === user.connectionId ? next : item))
+      ? roomUsers.value.map((item) => (getRoomUserConversationKey(item) === conversationKey ? next : item))
       : [...roomUsers.value, next];
   }
 
@@ -316,9 +327,9 @@ export function useChatOnlineApp() {
    * @param users 后端 presence 事件下发的在线用户；核心分支保留未读状态并移除已离线用户。
    */
   function syncRoomUsers(users: RelayRoomUser[]): void {
-    const previous = new Map(roomUsers.value.map((user) => [user.connectionId, user]));
+    const previous = new Map(roomUsers.value.map((user) => [getRoomUserConversationKey(user), user]));
     roomUsers.value = users.map((user) => {
-      const current = previous.get(user.connectionId);
+      const current = previous.get(getRoomUserConversationKey(user));
 
       return {
         ...user,
@@ -329,20 +340,20 @@ export function useChatOnlineApp() {
       };
     });
 
-    if (activeGuestId.value && !roomUsers.value.some((user) => user.connectionId === activeGuestId.value)) {
+    if (activeGuestId.value && !roomUsers.value.some((user) => getRoomUserConversationKey(user) === activeGuestId.value)) {
       activeGuestId.value = '';
     }
   }
 
   /**
    * 更新用户最近消息信息。
-   * @param connectionId 用户连接 ID。
+   * @param connectionId 用户会话聚合键。
    * @param timeText 展示时间；核心分支同步排序时间戳，驱动用户列表按新消息排序。
    * @param timeMs 排序时间戳。
    */
   function touchRoomUserMessage(connectionId: string, timeText: string, timeMs: number): void {
     roomUsers.value = roomUsers.value.map((user) =>
-      user.connectionId === connectionId ? { ...user, lastMessageAt: timeText, lastMessageAtMs: timeMs } : user
+      getRoomUserConversationKey(user) === connectionId ? { ...user, lastMessageAt: timeText, lastMessageAtMs: timeMs } : user
     );
   }
 
@@ -430,10 +441,11 @@ export function useChatOnlineApp() {
       return;
     }
 
-    activeGuestId.value = user.connectionId;
+    const conversationKey = getRoomUserConversationKey(user);
+    activeGuestId.value = conversationKey;
     pendingUnreadScrollIndex.value = user.firstUnreadIndex;
     roomUsers.value = roomUsers.value.map((item) =>
-      item.connectionId === user.connectionId ? { ...item, unreadCount: 0, firstUnreadIndex: null } : item
+      getRoomUserConversationKey(item) === conversationKey ? { ...item, unreadCount: 0, firstUnreadIndex: null } : item
     );
     scrollToFirstUnreadMessage();
   }
@@ -454,6 +466,51 @@ export function useChatOnlineApp() {
    */
   function getGuestChatHistoryKey(roomId: string): string {
     return `${storageKeys.guestChatHistoryPrefix}.${roomId}`;
+  }
+
+  /**
+   * 生成访客浏览器身份缓存键。
+   * @param roomId 房间 ID；核心分支为每个分享聊天室隔离访客身份，避免不同房间复用同一个访客名称。
+   * @returns 当前访客聊天室对应的身份缓存键。
+   */
+  function getGuestIdentityKey(roomId: string): string {
+    return `${storageKeys.guestIdentityPrefix}.${roomId}`;
+  }
+
+  /**
+   * 生成新的访客会话 ID。
+   * @returns 可放入 WebSocket 查询参数的稳定 ID；核心分支优先使用浏览器 randomUUID，不可用时回退到时间戳和随机数。
+   */
+  function createGuestSessionId(): string {
+    const randomId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+    return `guest-${randomId}`;
+  }
+
+  /**
+   * 获取或创建当前访客浏览器身份。
+   * @param roomId 房间 ID；核心分支为同一浏览器同一房间重连时复用会话 ID 和显示名，新访客首次进入时生成新身份。
+   * @returns 访客会话 ID 和展示名称。
+   */
+  function getGuestIdentity(roomId: string): { guestSessionId: string; username: string } {
+    const key = getGuestIdentityKey(roomId);
+    const raw = localStorage.getItem(key);
+
+    if (raw) {
+      const identity = JSON.parse(raw) as { guestSessionId?: string; username?: string };
+
+      if (identity.guestSessionId && identity.username) {
+        return { guestSessionId: identity.guestSessionId, username: identity.username };
+      }
+    }
+
+    const identity = {
+      guestSessionId: createGuestSessionId(),
+      username: `用户-${Date.now()}`
+    };
+    localStorage.setItem(key, JSON.stringify(identity));
+
+    return identity;
   }
 
   /**
@@ -534,30 +591,31 @@ export function useChatOnlineApp() {
   function appendAdminConversationMessage(guest: RelayRoomUser, message: ChatMessage, sentAt: Date): void {
     upsertRoomUser(guest);
 
-    const messages = roomConversations.value[guest.connectionId] ?? [];
+    const conversationKey = getRoomUserConversationKey(guest);
+    const messages = roomConversations.value[conversationKey] ?? [];
     const nextMessages = [...messages, message];
-    const shouldFocus = !activeGuestId.value || activeGuestId.value === guest.connectionId;
+    const shouldFocus = !activeGuestId.value || activeGuestId.value === conversationKey;
 
     roomConversations.value = {
       ...roomConversations.value,
-      [guest.connectionId]: nextMessages
+      [conversationKey]: nextMessages
     };
-    touchRoomUserMessage(guest.connectionId, message.time, sentAt.getTime());
+    touchRoomUserMessage(conversationKey, message.time, sentAt.getTime());
 
     if (!activeGuestId.value) {
-      activeGuestId.value = guest.connectionId;
+      activeGuestId.value = conversationKey;
     }
 
     if (shouldFocus) {
       roomUsers.value = roomUsers.value.map((user) =>
-        user.connectionId === guest.connectionId ? { ...user, unreadCount: 0, firstUnreadIndex: null } : user
+        getRoomUserConversationKey(user) === conversationKey ? { ...user, unreadCount: 0, firstUnreadIndex: null } : user
       );
       scrollToLatestReadMessage();
       return;
     }
 
     roomUsers.value = roomUsers.value.map((user) => {
-      if (user.connectionId !== guest.connectionId) {
+      if (getRoomUserConversationKey(user) !== conversationKey) {
         return user;
       }
 
@@ -576,20 +634,21 @@ export function useChatOnlineApp() {
    */
   function appendCurrentAdminMessage(text: string): boolean {
     const targetGuestId = selectedGuestId.value;
+    const conversationKey = activeGuestId.value;
 
-    if (!targetGuestId) {
+    if (!targetGuestId || !conversationKey) {
       setStatus('请先在左侧选择一位访客。', 'error');
       return false;
     }
 
     const now = new Date();
     const time = formatMessageTime(now);
-    const messages = roomConversations.value[targetGuestId] ?? [];
+    const messages = roomConversations.value[conversationKey] ?? [];
     roomConversations.value = {
       ...roomConversations.value,
-      [targetGuestId]: [...messages, { from: 'admin', text, time }]
+      [conversationKey]: [...messages, { from: 'admin', text, time }]
     };
-    touchRoomUserMessage(targetGuestId, time, now.getTime());
+    touchRoomUserMessage(conversationKey, time, now.getTime());
     scrollToLatestReadMessage();
 
     return true;
@@ -602,20 +661,21 @@ export function useChatOnlineApp() {
    */
   function appendCurrentAdminImage(image: ChatMessage): string {
     const targetGuestId = selectedGuestId.value;
+    const conversationKey = activeGuestId.value;
 
-    if (!targetGuestId) {
+    if (!targetGuestId || !conversationKey) {
       setStatus('请先在左侧选择一位访客。', 'error');
       return '';
     }
 
     const now = new Date();
     const time = image.time || formatMessageTime(now);
-    const messages = roomConversations.value[targetGuestId] ?? [];
+    const messages = roomConversations.value[conversationKey] ?? [];
     roomConversations.value = {
       ...roomConversations.value,
-      [targetGuestId]: [...messages, { ...image, time }]
+      [conversationKey]: [...messages, { ...image, time }]
     };
-    touchRoomUserMessage(targetGuestId, time, now.getTime());
+    touchRoomUserMessage(conversationKey, time, now.getTime());
     scrollToLatestReadMessage();
 
     return targetGuestId;
@@ -1622,7 +1682,7 @@ export function useChatOnlineApp() {
           `客服端收到访客图片：${data.payload?.mimeType ?? '未知类型'} ${formatByteSize(getUtf8ByteLength(data.payload?.dataUrl ?? ''))}`
         );
       }
-      notifyIncomingMessage(activeGuestId.value === data.from.connectionId);
+      notifyIncomingMessage(activeGuestId.value === getRoomUserConversationKey(data.from));
       if (data.type === 'image:start' && data.payload?.imageId && data.payload.mimeType && data.payload.totalChunks) {
         registerIncomingImageTransfer(data.payload.imageId, data.payload.mimeType, data.payload.totalChunks);
         appendIncomingImagePlaceholder(
@@ -1674,7 +1734,11 @@ export function useChatOnlineApp() {
 
     const generation = beginSocketConnection();
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/chat?role=guest&roomId=${encodeURIComponent(roomId)}`);
+    const guestIdentity = getGuestIdentity(roomId);
+    const socket = new WebSocket(
+      `${protocol}//${window.location.host}/ws/chat?role=guest&roomId=${encodeURIComponent(roomId)}` +
+        `&guestSessionId=${encodeURIComponent(guestIdentity.guestSessionId)}&guestName=${encodeURIComponent(guestIdentity.username)}`
+    );
     socketRef.value = socket;
     connectionStatus.value = '正在连接客服';
     let stopHeartbeat: (() => void) | null = null;

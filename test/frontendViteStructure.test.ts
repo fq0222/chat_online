@@ -201,6 +201,14 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /createChatHistoryStorage/);
   assert.match(frontEndSource, /guestChatHistoryEnabled/);
   assert.match(frontEndSource, /persistGuestChatHistory\(guestRoom\.value\?\.id \?\? ''\)/);
+  assert.match(frontEndSource, /guestIdentityPrefix/);
+  assert.match(frontEndSource, /getGuestIdentity\(roomId\)/);
+  assert.match(frontEndSource, /guestSessionId/);
+  assert.match(frontEndSource, /guestName/);
+  assert.match(frontEndSource, /getRoomUserConversationKey/);
+  assert.match(frontEndSource, /const conversationKey = getRoomUserConversationKey\(guest\)/);
+  assert.match(frontEndSource, /roomConversations\.value\[conversationKey\]/);
+  assert.match(frontEndSource, /getRoomUserActiveKey/);
   assert.match(frontEndSource, /toggle-chat-history-storage/);
   assert.match(frontEndSource, /type="checkbox"[\s\S]*保存记录/);
   assert.match(stylesCss, /\.chat-history-toggle\s*{/);

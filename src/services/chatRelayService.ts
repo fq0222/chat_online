@@ -37,6 +37,7 @@ export type RelayConnection = {
   roomId: string;
   role: 'admin' | 'guest';
   adminId?: string;
+  guestSessionId?: string;
   username: string;
 };
 
@@ -46,6 +47,11 @@ export type MessageSender = {
 
 type InternalConnection = RelayConnection & {
   sender: MessageSender;
+};
+
+type GuestIdentity = {
+  guestSessionId?: string;
+  username?: string;
 };
 
 type ChatRelayOptions = {
@@ -117,10 +123,13 @@ export class ChatRelayService {
    * @param sender 消息发送器，生产环境为 WebSocket。
    * @returns 自动生成用户名后的连接摘要。
    */
-  connectGuest(roomId: string, sender: MessageSender): RelayConnection {
+  connectGuest(roomId: string, sender: MessageSender, identity: GuestIdentity = {}): RelayConnection {
     const timestamp = this.now().getTime();
+    const guestSessionId = this.normalizeGuestSessionId(identity.guestSessionId);
+    const username = this.normalizeGuestUsername(identity.username) ?? `用户-${timestamp}`;
     const connection = this.createConnection(roomId, 'guest', sender, {
-      username: `用户-${timestamp}`
+      guestSessionId,
+      username
     });
     this.sendRoomUsers(roomId);
     logger.info(`访客连接聊天室：${roomId}`);
@@ -275,19 +284,50 @@ export class ChatRelayService {
     roomId: string,
     role: 'admin' | 'guest',
     sender: MessageSender,
-    data: { adminId?: string; username: string }
+    data: { adminId?: string; guestSessionId?: string; username: string }
   ): InternalConnection {
     const connection = {
       connectionId: crypto.randomUUID(),
       roomId,
       role,
       adminId: data.adminId,
+      guestSessionId: data.guestSessionId,
       username: data.username,
       sender
     };
 
     this.connections.set(connection.connectionId, connection);
     return connection;
+  }
+
+  /**
+   * 规范化访客浏览器会话标识。
+   * @param guestSessionId 客户端本地保存的访客会话 ID；核心分支为只接受短横线、下划线和字母数字，避免把任意查询串透传到管理端。
+   * @returns 合法会话 ID，不合法或为空时返回 undefined 并退回一次性连接身份。
+   */
+  private normalizeGuestSessionId(guestSessionId: string | undefined): string | undefined {
+    const value = guestSessionId?.trim();
+
+    if (!value || !/^[A-Za-z0-9_-]{8,80}$/.test(value)) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  /**
+   * 规范化访客展示名称。
+   * @param username 客户端随稳定会话传回的显示名；核心分支为去除首尾空白并限制长度，空值继续使用服务端默认名称。
+   * @returns 可展示的访客名称，不合法或为空时返回 undefined。
+   */
+  private normalizeGuestUsername(username: string | undefined): string | undefined {
+    const value = username?.trim();
+
+    if (!value) {
+      return undefined;
+    }
+
+    return value.slice(0, 40);
   }
 
   private findTarget(sender: InternalConnection, targetConnectionId?: string): InternalConnection | null {
@@ -433,6 +473,7 @@ export class ChatRelayService {
       roomId: connection.roomId,
       role: connection.role,
       adminId: connection.adminId,
+      guestSessionId: connection.guestSessionId,
       username: connection.username
     };
   }

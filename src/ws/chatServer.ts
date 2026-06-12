@@ -9,6 +9,17 @@ import { createLogger } from '../utils/logger';
 const logger = createLogger('WebSocket');
 const websocketHeartbeatMs = 25 * 1000;
 
+type ChatUpgradeContext = {
+  roomId: string;
+  role: string;
+  adminSession?: AuthSession;
+  welcomeMessage?: string;
+  guestIdentity?: {
+    guestSessionId?: string;
+    username?: string;
+  };
+};
+
 /**
  * 为服务端 WebSocket 添加协议层心跳。
  * @param socket WebSocket 连接；核心分支为定时 ping，连续无 pong 时终止僵尸连接。
@@ -61,6 +72,8 @@ export function attachChatServer(
     const roomId = url.searchParams.get('roomId');
     const role = url.searchParams.get('role');
     const token = url.searchParams.get('token') ?? undefined;
+    const guestSessionId = url.searchParams.get('guestSessionId') ?? undefined;
+    const guestName = url.searchParams.get('guestName') ?? undefined;
 
     if (!roomId || (role !== 'admin' && role !== 'guest')) {
       socket.destroy();
@@ -86,18 +99,19 @@ export function attachChatServer(
         roomId,
         role,
         adminSession: role === 'admin' ? session : undefined,
+        guestIdentity: role === 'guest' ? { guestSessionId, username: guestName } : undefined,
         welcomeMessage: room.welcomeMessage
       });
     });
   });
 
-  wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: { roomId: string; role: string; adminSession?: AuthSession; welcomeMessage?: string }) => {
+  wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: ChatUpgradeContext) => {
     const stopHeartbeat = attachServerHeartbeat(socket);
     const sender = { send: (message: string) => socket.send(message) };
     const connection =
       context.role === 'admin' && context.adminSession
         ? dependencies.chatRelayService.connectAdmin(context.roomId, context.adminSession.adminId, sender)
-        : dependencies.chatRelayService.connectGuest(context.roomId, sender);
+        : dependencies.chatRelayService.connectGuest(context.roomId, sender, context.guestIdentity);
 
     socket.send(JSON.stringify({ event: 'connection:ready', connection }));
 

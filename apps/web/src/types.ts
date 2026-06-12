@@ -50,6 +50,7 @@ export type RelayRoomUser = {
   roomId: string;
   role: MessageFrom;
   adminId?: string;
+  guestSessionId?: string;
   username: string;
 };
 

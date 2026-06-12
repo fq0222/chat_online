@@ -52,6 +52,15 @@ function updateMessageInput(event: Event): void {
     emit('update:messageInput', target.value);
   }
 }
+
+/**
+ * 获取管理端用户列表的稳定选中键。
+ * @param user 房间用户；核心分支为访客优先使用浏览器会话 ID，旧连接或管理员回退到连接 ID。
+ * @returns 可用于列表 key 和 active 判断的稳定标识。
+ */
+function getRoomUserActiveKey(user: RoomUser): string {
+  return user.role === 'guest' ? user.guestSessionId ?? user.connectionId : user.connectionId;
+}
 </script>
 
 <template>
@@ -86,9 +95,9 @@ function updateMessageInput(event: Event): void {
           <div class="room-user-list" aria-label="当前房间用户">
             <button
               v-for="user in roomUserList"
-              :key="user.connectionId"
+              :key="getRoomUserActiveKey(user)"
               class="room-user-card"
-              :class="{ active: user.connectionId === activeGuestId, self: user.role === 'admin' }"
+              :class="{ active: getRoomUserActiveKey(user) === activeGuestId, self: user.role === 'admin' }"
               type="button"
               @click="emit('select-room-user', user)"
             >

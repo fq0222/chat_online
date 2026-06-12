@@ -342,3 +342,24 @@ test('管理员收到房间在线用户快照并在访客进出时刷新', () =>
     [admin.connectionId]
   );
 });
+
+test('访客使用稳定浏览器身份重连时保留同一个访客会话标识和名称', () => {
+  const relay = new ChatRelayService({ now: () => new Date('2026-06-10T12:00:00.123Z') });
+  const firstSender = new MemorySender();
+  const secondSender = new MemorySender();
+
+  const firstGuest = relay.connectGuest('room-1', firstSender, {
+    guestSessionId: 'guest-session-stable-1',
+    username: '用户-固定'
+  });
+  relay.disconnect(firstGuest.connectionId);
+  const secondGuest = relay.connectGuest('room-1', secondSender, {
+    guestSessionId: 'guest-session-stable-1',
+    username: '用户-固定'
+  });
+
+  assert.notEqual(firstGuest.connectionId, secondGuest.connectionId);
+  assert.equal(firstGuest.guestSessionId, 'guest-session-stable-1');
+  assert.equal(secondGuest.guestSessionId, 'guest-session-stable-1');
+  assert.equal(secondGuest.username, '用户-固定');
+});
