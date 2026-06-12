@@ -120,3 +120,103 @@ test('媒体服务拒绝空分片正文并忽略重复分片完成计数', () =>
   assert.deepEqual(firstResult, { ok: true, complete: false, receivedChunks: 1, totalChunks: 2 });
   assert.deepEqual(repeatResult, { ok: true, complete: false, receivedChunks: 1, totalChunks: 2 });
 });
+
+test('媒体服务拒绝超过声明大小的分片', () => {
+  const media = new ChatMediaRelayService({ now: () => 1000 });
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+
+  const admin = media.connectMedia({ connectionId: 'admin-1', roomId: 'room-1', role: 'admin' }, adminSender);
+  const guest = media.connectMedia({ connectionId: 'guest-1', roomId: 'room-1', role: 'guest' }, guestSender);
+
+  media.startTransfer({
+    imageId: 'image-1',
+    roomId: 'room-1',
+    fromConnectionId: admin.connectionId,
+    toConnectionId: guest.connectionId,
+    totalChunks: 2,
+    chunkSize: 4,
+    size: 6
+  });
+
+  const oversizedChunk = media.handleChunk(admin.connectionId, {
+    type: 'image:chunk',
+    imageId: 'image-1',
+    chunkIndex: 0,
+    totalChunks: 2,
+    data: btoa('abcde')
+  });
+  const firstChunk = media.handleChunk(admin.connectionId, {
+    type: 'image:chunk',
+    imageId: 'image-1',
+    chunkIndex: 0,
+    totalChunks: 2,
+    data: btoa('abcd')
+  });
+  const oversizedTotal = media.handleChunk(admin.connectionId, {
+    type: 'image:chunk',
+    imageId: 'image-1',
+    chunkIndex: 1,
+    totalChunks: 2,
+    data: btoa('cde')
+  });
+
+  assert.equal(oversizedChunk.ok, false);
+  assert.equal(oversizedChunk.message, '图片分片大小超过限制');
+  assert.equal(firstChunk.ok, true);
+  assert.equal(oversizedTotal.ok, false);
+  assert.equal(oversizedTotal.message, '图片累计大小超过限制');
+});
+
+test('媒体连接断开和传输超时会清理相关会话', () => {
+  let now = 1000;
+  const media = new ChatMediaRelayService({ now: () => now, maxSessionIdleMs: 100 });
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+
+  const admin = media.connectMedia({ connectionId: 'admin-1', roomId: 'room-1', role: 'admin' }, adminSender);
+  const guest = media.connectMedia({ connectionId: 'guest-1', roomId: 'room-1', role: 'guest' }, guestSender);
+
+  media.startTransfer({
+    imageId: 'image-1',
+    roomId: 'room-1',
+    fromConnectionId: admin.connectionId,
+    toConnectionId: guest.connectionId,
+    totalChunks: 1,
+    chunkSize: 4,
+    size: 4
+  });
+  media.disconnectMedia(guest.connectionId);
+
+  const disconnectedResult = media.handleChunk(admin.connectionId, {
+    type: 'image:chunk',
+    imageId: 'image-1',
+    chunkIndex: 0,
+    totalChunks: 1,
+    data: btoa('abcd')
+  });
+  assert.equal(disconnectedResult.ok, false);
+  assert.equal(disconnectedResult.message, '图片传输不存在');
+
+  media.connectMedia({ connectionId: 'guest-1', roomId: 'room-1', role: 'guest' }, guestSender);
+  media.startTransfer({
+    imageId: 'image-2',
+    roomId: 'room-1',
+    fromConnectionId: admin.connectionId,
+    toConnectionId: guest.connectionId,
+    totalChunks: 1,
+    chunkSize: 4,
+    size: 4
+  });
+  now = 1200;
+
+  const expiredResult = media.handleChunk(admin.connectionId, {
+    type: 'image:chunk',
+    imageId: 'image-2',
+    chunkIndex: 0,
+    totalChunks: 1,
+    data: btoa('abcd')
+  });
+  assert.equal(expiredResult.ok, false);
+  assert.equal(expiredResult.message, '图片传输不存在');
+});

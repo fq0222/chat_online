@@ -34,11 +34,13 @@ type InternalMediaConnection = MediaConnection & {
 
 type InternalImageTransferSession = ImageTransferSession & {
   receivedChunks: Set<number>;
+  receivedBytesByChunk: Map<number, number>;
   updatedAt: number;
 };
 
 type ChatMediaRelayOptions = {
   now?: () => number;
+  maxSessionIdleMs?: number;
 };
 
 export type ChunkResult =
@@ -53,9 +55,11 @@ export class ChatMediaRelayService {
   private readonly connections = new Map<string, InternalMediaConnection>();
   private readonly transfers = new Map<string, InternalImageTransferSession>();
   private readonly now: () => number;
+  private readonly maxSessionIdleMs: number;
 
   constructor(options: ChatMediaRelayOptions = {}) {
     this.now = options.now ?? (() => Date.now());
+    this.maxSessionIdleMs = options.maxSessionIdleMs ?? 2 * 60 * 1000;
   }
 
   /**
@@ -75,6 +79,7 @@ export class ChatMediaRelayService {
    */
   disconnectMedia(connectionId: string): void {
     this.connections.delete(connectionId);
+    this.cleanupTransfersForConnection(connectionId);
   }
 
   /**
@@ -82,9 +87,11 @@ export class ChatMediaRelayService {
    * @param session 传输元数据；核心分支只保存分片路由和进度信息，不保存图片正文。
    */
   startTransfer(session: ImageTransferSession): void {
+    this.cleanupExpiredTransfers();
     this.transfers.set(session.imageId, {
       ...session,
       receivedChunks: new Set<number>(),
+      receivedBytesByChunk: new Map<number, number>(),
       updatedAt: this.now()
     });
   }
@@ -96,6 +103,7 @@ export class ChatMediaRelayService {
    * @returns 分片处理结果。
    */
   handleChunk(senderConnectionId: string, message: ImageChunkMessage): ChunkResult {
+    this.cleanupExpiredTransfers();
     const transfer = this.transfers.get(message.imageId);
 
     if (!transfer) {
@@ -114,6 +122,24 @@ export class ChatMediaRelayService {
       return { ok: false, message: '图片分片正文不能为空' };
     }
 
+    const chunkBytes = this.getBase64ByteLength(message.data);
+
+    if (chunkBytes === null) {
+      return { ok: false, message: '图片分片正文格式错误' };
+    }
+
+    if (chunkBytes > transfer.chunkSize) {
+      return { ok: false, message: '图片分片大小超过限制' };
+    }
+
+    const receivedBytes = [...transfer.receivedBytesByChunk.entries()]
+      .filter(([chunkIndex]) => chunkIndex !== message.chunkIndex)
+      .reduce((total, [, bytes]) => total + bytes, 0);
+
+    if (receivedBytes + chunkBytes > transfer.size) {
+      return { ok: false, message: '图片累计大小超过限制' };
+    }
+
     const target = this.connections.get(transfer.toConnectionId);
 
     if (!target) {
@@ -122,6 +148,7 @@ export class ChatMediaRelayService {
     }
 
     transfer.receivedChunks.add(message.chunkIndex);
+    transfer.receivedBytesByChunk.set(message.chunkIndex, chunkBytes);
     transfer.updatedAt = this.now();
     target.sender.send(
       JSON.stringify({
@@ -145,5 +172,44 @@ export class ChatMediaRelayService {
       receivedChunks: transfer.receivedChunks.size,
       totalChunks: transfer.totalChunks
     };
+  }
+
+  /**
+   * 计算 base64 正文解码后的字节数。
+   * @param data base64 分片正文；核心分支先校验字符和填充，再计算实际字节数。
+   * @returns 合法时返回字节数，否则返回 null。
+   */
+  private getBase64ByteLength(data: string): number | null {
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(data) || data.length % 4 !== 0) {
+      return null;
+    }
+
+    return Buffer.byteLength(data, 'base64');
+  }
+
+  /**
+   * 清理指定连接相关的传输会话。
+   * @param connectionId 已断开的媒体连接 ID；核心分支同时清理发送方和接收方关联会话。
+   */
+  private cleanupTransfersForConnection(connectionId: string): void {
+    [...this.transfers.entries()].forEach(([imageId, transfer]) => {
+      if (transfer.fromConnectionId === connectionId || transfer.toConnectionId === connectionId) {
+        this.transfers.delete(imageId);
+      }
+    });
+  }
+
+  /**
+   * 清理闲置过久的传输会话。
+   * 核心分支：每次开始传输或处理分片前触发，避免未完成图片长期占用内存元数据。
+   */
+  private cleanupExpiredTransfers(): void {
+    const now = this.now();
+
+    [...this.transfers.entries()].forEach(([imageId, transfer]) => {
+      if (now - transfer.updatedAt > this.maxSessionIdleMs) {
+        this.transfers.delete(imageId);
+      }
+    });
   }
 }
