@@ -47,6 +47,17 @@ function attachServerHeartbeat(socket: WebSocket): () => void {
 }
 
 /**
+ * 格式化 WebSocket 关闭原因。
+ * @param reason ws close 事件携带的二进制原因；核心分支为空时输出“无”，有内容时按 UTF-8 转为日志文本。
+ * @returns 可写入日志的关闭原因。
+ */
+function formatCloseReason(reason: Buffer): string {
+  const text = reason.toString('utf8').trim();
+
+  return text || '无';
+}
+
+/**
  * 挂载聊天室 WebSocket 服务。
  * @param server HTTP 服务实例。
  * @param dependencies 房间、鉴权和转发服务。
@@ -134,10 +145,16 @@ export function attachChatServer(
       }
     });
 
-    socket.on('close', () => {
+    socket.on('error', (error) => {
+      logger.error(`连接异常：${connection.roomId} ${connection.role} ${(error as Error).message} bufferedAmount=${socket.bufferedAmount}`);
+    });
+
+    socket.on('close', (code, reason) => {
       stopHeartbeat();
       dependencies.chatRelayService.disconnect(connection.connectionId);
-      logger.info(`连接已断开：${connection.roomId} ${connection.role}`);
+      logger.info(
+        `连接已断开：${connection.roomId} ${connection.role} code=${code} reason=${formatCloseReason(reason)} bufferedAmount=${socket.bufferedAmount}`
+      );
     });
   });
 

@@ -13,6 +13,10 @@ type QueuedChunk = {
 };
 
 const mediaHeartbeatMs = 25 * 1000;
+const mediaSendHighWatermarkBytes = 512 * 1024;
+const mediaSendLowWatermarkBytes = 256 * 1024;
+const mediaSendBatchSize = 4;
+const mediaSendPumpDelayMs = 16;
 
 /**
  * 创建图片媒体 WebSocket 客户端。
@@ -24,14 +28,60 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
   const socket = new WebSocket(url);
   const queue: QueuedChunk[] = [];
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let sendTimer: ReturnType<typeof setTimeout> | null = null;
   let closedByClient = false;
 
   /**
+   * 清理媒体分片发送定时器。
+   * 核心分支：连接关闭或主动重建时停止发送泵，避免旧连接继续消费队列。
+   */
+  function clearSendTimer(): void {
+    if (sendTimer) {
+      clearTimeout(sendTimer);
+      sendTimer = null;
+    }
+  }
+
+  /**
+   * 判断当前媒体连接是否需要等待底层发送缓冲释放。
+   * @returns true 表示 bufferedAmount 已超过高水位，需要暂停发送。
+   */
+  function shouldPauseForBackpressure(): boolean {
+    return socket.bufferedAmount >= mediaSendHighWatermarkBytes;
+  }
+
+  /**
+   * 安排下一轮媒体分片发送。
+   * @param delayMs 延迟毫秒数；核心分支为缓冲过高时短暂轮询，连接可写时继续推进队列。
+   */
+  function scheduleFlushQueue(delayMs = 0): void {
+    if (sendTimer || socket.readyState !== WebSocket.OPEN || !queue.length) {
+      return;
+    }
+
+    sendTimer = setTimeout(() => {
+      sendTimer = null;
+      flushQueue();
+    }, delayMs);
+  }
+
+  /**
    * 发送已排队的图片分片。
-   * 核心分支：仅在 socket 打开后发送，避免图片发送等待媒体连接握手。
+   * 核心分支：每轮只发送少量分片，并在 bufferedAmount 过高时暂停，避免公网代理和浏览器缓冲被瞬间打满。
    */
   function flushQueue(): void {
-    while (socket.readyState === WebSocket.OPEN && queue.length) {
+    if (socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    if (queue.length && socket.bufferedAmount > mediaSendLowWatermarkBytes && shouldPauseForBackpressure()) {
+      scheduleFlushQueue(mediaSendPumpDelayMs);
+      return;
+    }
+
+    let sentCount = 0;
+
+    while (queue.length && sentCount < mediaSendBatchSize && !shouldPauseForBackpressure()) {
       const item = queue.shift();
 
       if (!item) {
@@ -39,6 +89,11 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
       }
 
       socket.send(JSON.stringify({ type: 'image:chunk', imageId: item.imageId, ...item.chunk }));
+      sentCount += 1;
+    }
+
+    if (queue.length) {
+      scheduleFlushQueue(mediaSendPumpDelayMs);
     }
   }
 
@@ -79,6 +134,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
   });
   socket.addEventListener('close', () => {
     stopMediaHeartbeat();
+    clearSendTimer();
 
     if (!closedByClient) {
       handlers.onClose?.();
@@ -133,6 +189,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
     close(): void {
       closedByClient = true;
       queue.length = 0;
+      clearSendTimer();
       stopMediaHeartbeat();
       socket.close();
     }

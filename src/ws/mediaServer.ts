@@ -44,6 +44,17 @@ function attachServerHeartbeat(socket: WebSocket): () => void {
 }
 
 /**
+ * 格式化媒体 WebSocket 关闭原因。
+ * @param reason ws close 事件携带的二进制原因；核心分支为空时输出“无”，有内容时按 UTF-8 转为日志文本。
+ * @returns 可写入日志的关闭原因。
+ */
+function formatCloseReason(reason: Buffer): string {
+  const text = reason.toString('utf8').trim();
+
+  return text || '无';
+}
+
+/**
  * 挂载图片媒体 WebSocket 服务。
  * @param server HTTP 服务实例。
  * @param dependencies 房间、鉴权、聊天控制通道和媒体转发服务。
@@ -135,10 +146,16 @@ export function attachMediaServer(
       }
     });
 
-    socket.on('close', () => {
+    socket.on('error', (error) => {
+      logger.error(`媒体连接异常：${connection.roomId} ${connection.role} ${(error as Error).message} bufferedAmount=${socket.bufferedAmount}`);
+    });
+
+    socket.on('close', (code, reason) => {
       stopHeartbeat();
       dependencies.chatMediaRelayService.disconnectMedia(connection.connectionId);
-      logger.info(`媒体连接已断开：${connection.roomId} ${connection.role}`);
+      logger.info(
+        `媒体连接已断开：${connection.roomId} ${connection.role} code=${code} reason=${formatCloseReason(reason)} bufferedAmount=${socket.bufferedAmount}`
+      );
     });
 
     logger.info(`媒体连接已建立：${connection.roomId} ${connection.role}`);

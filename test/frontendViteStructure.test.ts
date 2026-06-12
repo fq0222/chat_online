@@ -183,7 +183,7 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(stylesCss, /\.guest-chat-shell\s*{[^}]*grid-template-rows:\s*64px minmax\(0,\s*1fr\) 192px/s);
   assert.match(stylesCss, /\.guest-refresh-warning\s*{[^}]*color:\s*#dc2626/s);
   assert.match(frontEndSource, /maxImageBytes\s*=\s*1024\s*\*\s*1024\s*\*\s*5/);
-  assert.match(frontEndSource, /maxPendingImages\s*=\s*1/);
+  assert.match(frontEndSource, /maxPendingImages\s*=\s*3/);
   assert.match(frontEndSource, /每次最多发送 \$\{maxPendingImages\} 张图片。/);
   assert.match(frontEndSource, /pendingImages/);
   assert.match(frontEndSource, /image-preview/);
@@ -262,8 +262,14 @@ test('后端必须挂载独立图片媒体 WebSocket 通道', () => {
   assert.match(chatServer, /connection:ready/);
   assert.match(chatServer, /socket\.ping\(\)/);
   assert.match(chatServer, /event:\s*'pong'/);
+  assert.match(chatServer, /socket\.on\('close', \(code, reason\)/);
+  assert.match(chatServer, /bufferedAmount/);
+  assert.match(chatServer, /socket\.on\('error'/);
   assert.match(mediaServer, /socket\.ping\(\)/);
   assert.match(mediaServer, /event:\s*'pong'/);
+  assert.match(mediaServer, /socket\.on\('close', \(code, reason\)/);
+  assert.match(mediaServer, /bufferedAmount/);
+  assert.match(mediaServer, /socket\.on\('error'/);
   assert.match(appRuntime, /startSocketHeartbeat/);
   assert.match(appRuntime, /type:\s*'ping'/);
   assert.match(mediaSocket, /startMediaHeartbeat/);
