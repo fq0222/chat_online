@@ -1308,7 +1308,7 @@ export function useChatOnlineApp() {
    * 处理媒体通道收到的图片分片。
    * @param message 图片分片消息；核心分支为去重、更新进度，并在收齐后合成 blob URL。
    */
-  async function handleMediaChunk(message: { imageId: string; chunkIndex: number; totalChunks: number; data: string }): Promise<void> {
+  async function handleMediaChunk(message: { imageId: string; chunkIndex: number; totalChunks: number; data: ArrayBuffer }): Promise<void> {
     const transfer = incomingImageTransfers.get(message.imageId);
 
     if (!transfer) {

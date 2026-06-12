@@ -7,7 +7,7 @@ export type MediaConnection = {
 };
 
 export type MediaSender = {
-  send: (message: string) => void;
+  send: (message: string | Buffer) => void;
 };
 
 export type ImageChunkMessage = {
@@ -15,7 +15,7 @@ export type ImageChunkMessage = {
   imageId: string;
   chunkIndex: number;
   totalChunks: number;
-  data: string;
+  data: Buffer;
 };
 
 export type ImageTransferSession = {
@@ -47,6 +47,73 @@ type ChatMediaRelayOptions = {
 export type ChunkResult =
   | { ok: true; complete: boolean; receivedChunks: number; totalChunks: number }
   | { ok: false; message: string };
+
+/**
+ * 将图片分片编码为服务端可转发的二进制帧。
+ * @param message 图片分片消息；核心分支写入 4 字节元数据长度、UTF-8 JSON 元数据和原始图片字节。
+ * @returns 可直接写入 WebSocket 的二进制帧。
+ */
+export function encodeImageChunkFrame(message: ImageChunkMessage): Buffer {
+  const metadata = Buffer.from(
+    JSON.stringify({
+      type: message.type,
+      imageId: message.imageId,
+      chunkIndex: message.chunkIndex,
+      totalChunks: message.totalChunks
+    }),
+    'utf8'
+  );
+  const frame = Buffer.allocUnsafe(4 + metadata.byteLength + message.data.byteLength);
+
+  frame.writeUInt32BE(metadata.byteLength, 0);
+  metadata.copy(frame, 4);
+  message.data.copy(frame, 4 + metadata.byteLength);
+
+  return frame;
+}
+
+/**
+ * 解码媒体 WebSocket 收到的图片二进制分片帧。
+ * @param frame WebSocket 原始二进制帧；核心分支解析元数据并保留后续原始图片字节。
+ * @returns 可交给媒体转发服务校验和转发的分片消息。
+ */
+export function decodeImageChunkFrame(frame: Buffer): ImageChunkMessage {
+  if (frame.byteLength < 4) {
+    throw new Error('图片分片格式错误');
+  }
+
+  const metadataLength = frame.readUInt32BE(0);
+  const metadataStart = 4;
+  const metadataEnd = metadataStart + metadataLength;
+
+  if (metadataLength <= 0 || metadataEnd > frame.byteLength) {
+    throw new Error('图片分片格式错误');
+  }
+
+  const metadata = JSON.parse(frame.subarray(metadataStart, metadataEnd).toString('utf8')) as {
+    type?: string;
+    imageId?: string;
+    chunkIndex?: number;
+    totalChunks?: number;
+  };
+
+  if (
+    metadata.type !== 'image:chunk' ||
+    !metadata.imageId ||
+    typeof metadata.chunkIndex !== 'number' ||
+    typeof metadata.totalChunks !== 'number'
+  ) {
+    throw new Error('图片分片格式错误');
+  }
+
+  return {
+    type: 'image:chunk',
+    imageId: metadata.imageId,
+    chunkIndex: metadata.chunkIndex,
+    totalChunks: metadata.totalChunks,
+    data: frame.subarray(metadataEnd)
+  };
+}
 
 /**
  * 聊天图片媒体分片转发服务。
@@ -120,15 +187,11 @@ export class ChatMediaRelayService {
       return { ok: false, message: '图片分片序号无效' };
     }
 
-    if (!message.data.trim()) {
+    if (!Buffer.isBuffer(message.data) || message.data.byteLength === 0) {
       return { ok: false, message: '图片分片正文不能为空' };
     }
 
-    const chunkBytes = this.getBase64ByteLength(message.data);
-
-    if (chunkBytes === null) {
-      return { ok: false, message: '图片分片正文格式错误' };
-    }
+    const chunkBytes = message.data.byteLength;
 
     if (chunkBytes > transfer.chunkSize) {
       return { ok: false, message: '图片分片大小超过限制' };
@@ -181,15 +244,7 @@ export class ChatMediaRelayService {
    * @param message 已通过校验的图片分片消息。
    */
   private sendChunkToTarget(target: InternalMediaConnection, message: ImageChunkMessage): void {
-    target.sender.send(
-      JSON.stringify({
-        event: 'image:chunk',
-        imageId: message.imageId,
-        chunkIndex: message.chunkIndex,
-        totalChunks: message.totalChunks,
-        data: message.data
-      })
-    );
+    target.sender.send(encodeImageChunkFrame(message));
   }
 
   /**
@@ -218,19 +273,6 @@ export class ChatMediaRelayService {
         this.transfers.delete(imageId);
       }
     });
-  }
-
-  /**
-   * 计算 base64 正文解码后的字节数。
-   * @param data base64 分片正文；核心分支先校验字符和填充，再计算实际字节数。
-   * @returns 合法时返回字节数，否则返回 null。
-   */
-  private getBase64ByteLength(data: string): number | null {
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(data) || data.length % 4 !== 0) {
-      return null;
-    }
-
-    return Buffer.byteLength(data, 'base64');
   }
 
   /**

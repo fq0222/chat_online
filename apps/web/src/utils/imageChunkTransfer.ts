@@ -1,7 +1,7 @@
 export type ImageChunk = {
   chunkIndex: number;
   totalChunks: number;
-  data: string;
+  data: ArrayBuffer;
 };
 
 export type PreparedImageChunks = {
@@ -11,6 +11,13 @@ export type PreparedImageChunks = {
   chunkSize: number;
   totalChunks: number;
   chunks: ImageChunk[];
+};
+
+export type DecodedImageChunkFrame = {
+  imageId: string;
+  chunkIndex: number;
+  totalChunks: number;
+  data: ArrayBuffer;
 };
 
 /**
@@ -37,24 +44,8 @@ function createImageTransferId(): string {
 }
 
 /**
- * 将 ArrayBuffer 转为 base64 字符串。
- * @param buffer 二进制分片；核心分支按字节拼接后交给 btoa 编码。
- * @returns 可放入 JSON WebSocket 消息的 base64 文本。
- */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-
-  return btoa(binary);
-}
-
-/**
  * 将 base64 字符串转回 Uint8Array。
- * @param value base64 分片正文；核心分支逐字节还原，供 Blob 合成使用。
+ * @param value dataURL 中的 base64 正文；核心分支逐字节还原，供 Blob 合成使用。
  * @returns 分片二进制数据。
  */
 function base64ToArrayBuffer(value: string): ArrayBuffer {
@@ -66,6 +57,88 @@ function base64ToArrayBuffer(value: string): ArrayBuffer {
   }
 
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+/**
+ * 截取 Uint8Array 背后的精确 ArrayBuffer。
+ * @param bytes 待截取的字节视图；核心分支避免把底层更大的共享 buffer 一并传出。
+ * @returns 与视图范围完全一致的 ArrayBuffer。
+ */
+function sliceExactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+
+  return buffer;
+}
+
+/**
+ * 将图片分片编码为单个二进制 WebSocket 帧。
+ * @param imageId 图片传输 ID。
+ * @param chunk 图片分片；核心分支在前 4 字节写入元数据长度，随后拼接 UTF-8 JSON 元数据和原始图片字节。
+ * @returns 可直接通过 WebSocket.send 发送的二进制帧。
+ */
+export function encodeImageChunkFrame(imageId: string, chunk: ImageChunk): ArrayBuffer {
+  const metadata = new TextEncoder().encode(
+    JSON.stringify({
+      type: 'image:chunk',
+      imageId,
+      chunkIndex: chunk.chunkIndex,
+      totalChunks: chunk.totalChunks
+    })
+  );
+  const payload = new Uint8Array(chunk.data);
+  const frame = new Uint8Array(4 + metadata.byteLength + payload.byteLength);
+  const view = new DataView(frame.buffer);
+
+  view.setUint32(0, metadata.byteLength);
+  frame.set(metadata, 4);
+  frame.set(payload, 4 + metadata.byteLength);
+
+  return frame.buffer;
+}
+
+/**
+ * 解析图片分片二进制 WebSocket 帧。
+ * @param frame 收到的二进制帧；核心分支先读取元数据长度，再解析 JSON 元数据和图片原始字节。
+ * @returns 解码后的图片分片。
+ */
+export function decodeImageChunkFrame(frame: ArrayBuffer): DecodedImageChunkFrame {
+  if (frame.byteLength < 4) {
+    throw new Error('图片分片格式错误');
+  }
+
+  const view = new DataView(frame);
+  const metadataLength = view.getUint32(0);
+  const metadataStart = 4;
+  const metadataEnd = metadataStart + metadataLength;
+
+  if (metadataLength <= 0 || metadataEnd > frame.byteLength) {
+    throw new Error('图片分片格式错误');
+  }
+
+  const bytes = new Uint8Array(frame);
+  const metadata = JSON.parse(new TextDecoder().decode(bytes.slice(metadataStart, metadataEnd))) as {
+    type?: string;
+    imageId?: string;
+    chunkIndex?: number;
+    totalChunks?: number;
+  };
+
+  if (
+    metadata.type !== 'image:chunk' ||
+    !metadata.imageId ||
+    typeof metadata.chunkIndex !== 'number' ||
+    typeof metadata.totalChunks !== 'number'
+  ) {
+    throw new Error('图片分片格式错误');
+  }
+
+  return {
+    imageId: metadata.imageId,
+    chunkIndex: metadata.chunkIndex,
+    totalChunks: metadata.totalChunks,
+    data: sliceExactArrayBuffer(bytes.slice(metadataEnd))
+  };
 }
 
 /**
@@ -94,7 +167,7 @@ export async function createImageChunks(blob: Blob, chunkSize: number): Promise<
     const start = chunkIndex * chunkSize;
     const end = Math.min(blob.size, start + chunkSize);
     const buffer = await blob.slice(start, end).arrayBuffer();
-    chunks.push({ chunkIndex, totalChunks, data: arrayBufferToBase64(buffer) });
+    chunks.push({ chunkIndex, totalChunks, data: buffer });
   }
 
   return {
@@ -115,7 +188,7 @@ export async function createImageChunks(blob: Blob, chunkSize: number): Promise<
  */
 export async function assembleImageChunks(chunks: ImageChunk[], mimeType: string): Promise<Blob> {
   const orderedChunks = [...chunks].sort((left, right) => left.chunkIndex - right.chunkIndex);
-  const parts = orderedChunks.map((chunk) => base64ToArrayBuffer(chunk.data));
+  const parts = orderedChunks.map((chunk) => chunk.data);
 
   return new Blob(parts, { type: mimeType });
 }

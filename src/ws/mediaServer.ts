@@ -1,8 +1,8 @@
 import type http from 'node:http';
 import type { IncomingMessage } from 'node:http';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import type { AuthService, AuthSession } from '../services/authService';
-import type { ChatMediaRelayService, ImageChunkMessage } from '../services/chatMediaRelayService';
+import { decodeImageChunkFrame, type ChatMediaRelayService } from '../services/chatMediaRelayService';
 import type { ChatRelayService } from '../services/chatRelayService';
 import type { RoomService } from '../services/roomService';
 import { createLogger } from '../utils/logger';
@@ -26,6 +26,27 @@ function formatCloseReason(reason: Buffer): string {
   const text = reason.toString('utf8').trim();
 
   return text || '无';
+}
+
+/**
+ * 统一媒体 WebSocket 收到的二进制正文。
+ * @param rawMessage ws message 事件正文；核心分支兼容 Buffer、ArrayBuffer 和 Buffer 数组。
+ * @returns 可交给图片分片帧解码器的 Buffer。
+ */
+function normalizeBinaryMessage(rawMessage: RawData): Buffer {
+  if (Buffer.isBuffer(rawMessage)) {
+    return rawMessage;
+  }
+
+  if (rawMessage instanceof ArrayBuffer) {
+    return Buffer.from(rawMessage);
+  }
+
+  if (Array.isArray(rawMessage)) {
+    return Buffer.concat(rawMessage);
+  }
+
+  return Buffer.from(rawMessage);
 }
 
 /**
@@ -95,23 +116,29 @@ export function attachMediaServer(
 
   wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: MediaUpgradeContext) => {
     const heartbeat = attachServerHeartbeat(socket);
-    const sender = { send: (message: string) => socket.send(message) };
+    const sender = { send: (message: string | Buffer) => socket.send(message) };
     const connection = dependencies.chatMediaRelayService.connectMedia(
       { connectionId: context.connectionId, roomId: context.roomId, role: context.role },
       sender
     );
 
-    socket.on('message', (rawMessage) => {
+    socket.on('message', (rawMessage, isBinary) => {
       heartbeat.markAlive();
 
       try {
-        const message = JSON.parse(rawMessage.toString()) as ImageChunkMessage;
+        if (!isBinary) {
+          const message = JSON.parse(rawMessage.toString()) as { type?: string };
 
-        if ((message as { type?: string }).type === 'ping') {
-          socket.send(JSON.stringify({ event: 'pong' }));
+          if (message.type === 'ping') {
+            socket.send(JSON.stringify({ event: 'pong' }));
+            return;
+          }
+
+          socket.send(JSON.stringify({ event: 'image:error', message: '图片分片格式错误' }));
           return;
         }
 
+        const message = decodeImageChunkFrame(normalizeBinaryMessage(rawMessage));
         const result = dependencies.chatMediaRelayService.handleChunk(connection.connectionId, message);
 
         if (!result.ok) {

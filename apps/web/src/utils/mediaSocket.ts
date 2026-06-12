@@ -1,9 +1,9 @@
-import type { ImageChunk } from './imageChunkTransfer';
+import { decodeImageChunkFrame, encodeImageChunkFrame, type ImageChunk } from './imageChunkTransfer';
 
 export type MediaSocketHandlers = {
   onOpen?: () => void;
   onClose?: () => void;
-  onChunk: (message: { imageId: string; chunkIndex: number; totalChunks: number; data: string }) => void;
+  onChunk: (message: { imageId: string; chunkIndex: number; totalChunks: number; data: ArrayBuffer }) => void;
   onError: (message: { imageId?: string; message?: string }) => void;
 };
 
@@ -26,6 +26,7 @@ const mediaSendPumpDelayMs = 16;
  */
 export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
   const socket = new WebSocket(url);
+  socket.binaryType = 'arraybuffer';
   const queue: QueuedChunk[] = [];
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let sendTimer: ReturnType<typeof setTimeout> | null = null;
@@ -88,7 +89,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
         return;
       }
 
-      socket.send(JSON.stringify({ type: 'image:chunk', imageId: item.imageId, ...item.chunk }));
+      socket.send(encodeImageChunkFrame(item.imageId, item.chunk));
       sentCount += 1;
     }
 
@@ -127,6 +128,52 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
     }
   }
 
+  /**
+   * 将浏览器收到的二进制消息转为 ArrayBuffer。
+   * @param value WebSocket message 事件正文；核心分支优先处理 arraybuffer，Blob 作为兼容兜底。
+   * @returns 可交给图片分片解码器的二进制帧。
+   */
+  async function normalizeBinaryMessage(value: unknown): Promise<ArrayBuffer> {
+    if (value instanceof ArrayBuffer) {
+      return value;
+    }
+
+    if (value instanceof Blob) {
+      return value.arrayBuffer();
+    }
+
+    throw new Error('图片分片格式错误');
+  }
+
+  /**
+   * 处理媒体 WebSocket 消息。
+   * @param event 浏览器 WebSocket 消息事件；核心分支为 JSON 控制消息和二进制图片分片。
+   */
+  async function handleSocketMessage(event: MessageEvent): Promise<void> {
+    try {
+      if (typeof event.data !== 'string') {
+        handlers.onChunk(decodeImageChunkFrame(await normalizeBinaryMessage(event.data)));
+        return;
+      }
+
+      const data = JSON.parse(event.data) as {
+        event: string;
+        imageId?: string;
+        message?: string;
+      };
+
+      if (data.event === 'pong') {
+        return;
+      }
+
+      if (data.event === 'image:error') {
+        handlers.onError({ imageId: data.imageId, message: data.message });
+      }
+    } catch (error) {
+      handlers.onError({ message: (error as Error).message });
+    }
+  }
+
   socket.addEventListener('open', () => {
     flushQueue();
     startMediaHeartbeat();
@@ -141,27 +188,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
     }
   });
   socket.addEventListener('message', (event) => {
-    const data = JSON.parse(event.data) as {
-      event: string;
-      imageId?: string;
-      chunkIndex?: number;
-      totalChunks?: number;
-      data?: string;
-      message?: string;
-    };
-
-    if (data.event === 'pong') {
-      return;
-    }
-
-    if (data.event === 'image:chunk' && data.imageId && typeof data.chunkIndex === 'number' && typeof data.totalChunks === 'number' && data.data) {
-      handlers.onChunk({ imageId: data.imageId, chunkIndex: data.chunkIndex, totalChunks: data.totalChunks, data: data.data });
-      return;
-    }
-
-    if (data.event === 'image:error') {
-      handlers.onError({ imageId: data.imageId, message: data.message });
-    }
+    void handleSocketMessage(event);
   });
 
   return {

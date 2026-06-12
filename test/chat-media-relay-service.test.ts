@@ -5,9 +5,34 @@ import { ChatMediaRelayService } from '../src/services/chatMediaRelayService';
 class MemorySender {
   readonly messages: unknown[] = [];
 
-  send(message: string): void {
-    this.messages.push(JSON.parse(message));
+  send(message: string | Buffer): void {
+    this.messages.push(typeof message === 'string' ? JSON.parse(message) : decodeBinaryChunkFrame(message));
   }
+}
+
+/**
+ * 创建测试用图片分片字节。
+ * @param value 分片文本；核心分支按 UTF-8 转为 Buffer，模拟 WebSocket 二进制帧中的图片正文。
+ * @returns 可交给媒体服务处理的分片正文。
+ */
+function chunk(value: string): Buffer {
+  return Buffer.from(value, 'utf8');
+}
+
+/**
+ * 解析测试收到的二进制图片分片帧。
+ * @param frame 服务端转发给接收方的二进制帧；核心分支读取 4 字节元数据长度，再解析 JSON 元数据和原始字节。
+ * @returns 便于断言的分片摘要。
+ */
+function decodeBinaryChunkFrame(frame: Buffer): Record<string, unknown> {
+  const metadataLength = frame.readUInt32BE(0);
+  const metadataEnd = 4 + metadataLength;
+  const metadata = JSON.parse(frame.subarray(4, metadataEnd).toString('utf8')) as Record<string, unknown>;
+
+  return {
+    ...metadata,
+    data: frame.subarray(metadataEnd)
+  };
 }
 
 test('图片分片通过媒体服务转发给目标媒体连接', () => {
@@ -32,16 +57,16 @@ test('图片分片通过媒体服务转发给目标媒体连接', () => {
     imageId: 'image-1',
     chunkIndex: 0,
     totalChunks: 2,
-    data: 'YWJj'
+    data: chunk('abc')
   });
 
   assert.equal(result.ok, true);
   assert.deepEqual(guestSender.messages[0], {
-    event: 'image:chunk',
+    type: 'image:chunk',
     imageId: 'image-1',
     chunkIndex: 0,
     totalChunks: 2,
-    data: 'YWJj'
+    data: chunk('abc')
   });
 });
 
@@ -67,7 +92,7 @@ test('接收方媒体连接稍后建立时会收到已经到达的图片分片',
     imageId: 'image-late-target',
     chunkIndex: 0,
     totalChunks: 2,
-    data: btoa('abcd')
+    data: chunk('abcd')
   });
 
   assert.deepEqual(firstResult, { ok: true, complete: false, receivedChunks: 1, totalChunks: 2 });
@@ -77,11 +102,11 @@ test('接收方媒体连接稍后建立时会收到已经到达的图片分片',
 
   assert.deepEqual(guestSender.messages, [
     {
-      event: 'image:chunk',
+      type: 'image:chunk',
       imageId: 'image-late-target',
       chunkIndex: 0,
       totalChunks: 2,
-      data: btoa('abcd')
+      data: chunk('abcd')
     }
   ]);
 });
@@ -108,7 +133,7 @@ test('媒体服务拒绝越界分片且不影响其他传输', () => {
     imageId: 'image-1',
     chunkIndex: 1,
     totalChunks: 1,
-    data: 'YWJj'
+    data: chunk('abc')
   });
 
   assert.equal(result.ok, false);
@@ -139,21 +164,21 @@ test('媒体服务拒绝空分片正文并忽略重复分片完成计数', () =>
     imageId: 'image-1',
     chunkIndex: 0,
     totalChunks: 2,
-    data: ''
+    data: Buffer.alloc(0)
   });
   const firstResult = media.handleChunk(admin.connectionId, {
     type: 'image:chunk',
     imageId: 'image-1',
     chunkIndex: 0,
     totalChunks: 2,
-    data: 'YWJj'
+    data: chunk('abc')
   });
   const repeatResult = media.handleChunk(admin.connectionId, {
     type: 'image:chunk',
     imageId: 'image-1',
     chunkIndex: 0,
     totalChunks: 2,
-    data: 'YWJj'
+    data: chunk('abc')
   });
 
   assert.equal(invalidResult.ok, false);
@@ -185,21 +210,21 @@ test('媒体服务拒绝超过声明大小的分片', () => {
     imageId: 'image-1',
     chunkIndex: 0,
     totalChunks: 2,
-    data: btoa('abcde')
+    data: chunk('abcde')
   });
   const firstChunk = media.handleChunk(admin.connectionId, {
     type: 'image:chunk',
     imageId: 'image-1',
     chunkIndex: 0,
     totalChunks: 2,
-    data: btoa('abcd')
+    data: chunk('abcd')
   });
   const oversizedTotal = media.handleChunk(admin.connectionId, {
     type: 'image:chunk',
     imageId: 'image-1',
     chunkIndex: 1,
     totalChunks: 2,
-    data: btoa('cde')
+    data: chunk('cde')
   });
 
   assert.equal(oversizedChunk.ok, false);
@@ -234,7 +259,7 @@ test('媒体连接短暂断开不会清理传输会话并在重连后补发分�
     imageId: 'image-1',
     chunkIndex: 0,
     totalChunks: 1,
-    data: btoa('abcd')
+    data: chunk('abcd')
   });
   assert.deepEqual(pendingResult, { ok: true, complete: true, receivedChunks: 1, totalChunks: 1 });
   assert.equal(guestSender.messages.length, 0);
@@ -242,11 +267,11 @@ test('媒体连接短暂断开不会清理传输会话并在重连后补发分�
   media.connectMedia({ connectionId: 'guest-1', roomId: 'room-1', role: 'guest' }, guestSender);
   assert.deepEqual(guestSender.messages, [
     {
-      event: 'image:chunk',
+      type: 'image:chunk',
       imageId: 'image-1',
       chunkIndex: 0,
       totalChunks: 1,
-      data: btoa('abcd')
+      data: chunk('abcd')
     }
   ]);
 
@@ -266,7 +291,7 @@ test('媒体连接短暂断开不会清理传输会话并在重连后补发分�
     imageId: 'image-2',
     chunkIndex: 0,
     totalChunks: 1,
-    data: btoa('abcd')
+    data: chunk('abcd')
   });
   assert.equal(expiredResult.ok, false);
   assert.equal(expiredResult.message, '图片传输不存在');
