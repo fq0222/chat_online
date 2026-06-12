@@ -88,6 +88,7 @@ export function useChatOnlineApp() {
       localDataUrl: string;
       localMessageId: string;
       startConfirmed: boolean;
+      startSent: boolean;
       startMessage: {
         type: 'image:start';
         clientMessageId: string;
@@ -729,12 +730,44 @@ export function useChatOnlineApp() {
   }
 
   /**
+   * 判断消息列表是否已经包含指定图片。
+   * @param messages 候选消息列表；核心分支按 imageId 去重，避免重复 image:start 产生多个 0% 占位。
+   * @param imageId 图片传输 ID。
+   * @returns true 表示该图片消息已经存在。
+   */
+  function hasImageMessage(messages: ChatMessage[], imageId: string): boolean {
+    return messages.some((message) => message.imageId === imageId);
+  }
+
+  /**
+   * 判断当前页面是否已经写入过指定远端图片。
+   * @param imageId 图片传输 ID。
+   * @param from 发送方连接摘要，管理端用于定位访客会话。
+   * @returns true 表示同一 imageId 的占位或成图已经存在。
+   */
+  function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): boolean {
+    if (page.value === 'guest-chat') {
+      return hasImageMessage(chatMessages.value, imageId);
+    }
+
+    if (!from) {
+      return false;
+    }
+
+    return hasImageMessage(roomConversations.value[getRoomUserConversationKey(from)] ?? [], imageId);
+  }
+
+  /**
    * 写入远端图片占位消息。
    * @param message 图片消息；核心分支按当前页面角色写入访客时间线或管理端对应访客会话。
    * @param from 发送方连接摘要，管理端用于定位访客会话。
    * @param sentAt 服务端发送时间。
    */
   function appendIncomingImagePlaceholder(message: ChatMessage, from: RelayRoomUser | null, sentAt: Date): void {
+    if (message.imageId && hasIncomingImageMessage(message.imageId, from)) {
+      return;
+    }
+
     if (page.value === 'guest-chat') {
       chatMessages.value.push(message);
       persistGuestChatHistory(guestRoom.value?.id ?? '');
@@ -1027,6 +1060,7 @@ export function useChatOnlineApp() {
         localDataUrl: image.dataUrl,
         localMessageId: clientMessageId,
         startConfirmed: false,
+        startSent: false,
         startMessage
       });
 
@@ -1211,6 +1245,7 @@ export function useChatOnlineApp() {
   function markPendingImageStartsUnconfirmed(): void {
     outgoingImageBatches.forEach((batch) => {
       batch.startConfirmed = false;
+      batch.startSent = false;
     });
   }
 
@@ -1224,7 +1259,7 @@ export function useChatOnlineApp() {
     }
 
     outgoingImageBatches.forEach((batch) => {
-      if (batch.startConfirmed) {
+      if (batch.startConfirmed || batch.startSent) {
         return;
       }
 
@@ -1239,6 +1274,7 @@ export function useChatOnlineApp() {
       }
 
       socketRef.value?.send(JSON.stringify(batch.startMessage));
+      batch.startSent = true;
       imageLogger.info(`图片开始消息已发送，等待服务端确认：${batch.localMessageId}`);
     });
   }
@@ -1256,9 +1292,16 @@ export function useChatOnlineApp() {
    * @param imageId 图片传输 ID。
    * @param mimeType 图片 MIME 类型。
    * @param totalChunks 总分片数；核心分支为后续分片合成保存轻量元数据。
+   * @param from 发送方连接摘要，管理端用于定位访客会话。
+   * @returns true 表示新传输已登记；重复 imageId 会返回 false，避免重复占位停留在 0%。
    */
-  function registerIncomingImageTransfer(imageId: string, mimeType: string, totalChunks: number): void {
+  function registerIncomingImageTransfer(imageId: string, mimeType: string, totalChunks: number, from: RelayRoomUser | null): boolean {
+    if (incomingImageTransfers.has(imageId) || hasIncomingImageMessage(imageId, from)) {
+      return false;
+    }
+
     incomingImageTransfers.set(imageId, { mimeType, totalChunks, chunks: [] });
+    return true;
   }
 
   /**
@@ -1805,7 +1848,10 @@ export function useChatOnlineApp() {
       }
       notifyIncomingMessage(activeGuestId.value === getRoomUserConversationKey(data.from));
       if (data.type === 'image:start' && data.payload?.imageId && data.payload.mimeType && data.payload.totalChunks) {
-        registerIncomingImageTransfer(data.payload.imageId, data.payload.mimeType, data.payload.totalChunks);
+        if (!registerIncomingImageTransfer(data.payload.imageId, data.payload.mimeType, data.payload.totalChunks, data.from)) {
+          return;
+        }
+
         appendIncomingImagePlaceholder(
           {
             from: 'guest',
@@ -1924,7 +1970,10 @@ export function useChatOnlineApp() {
       }
       if (data.type === 'image:start' && data.payload?.imageId && data.payload.mimeType && data.payload.totalChunks) {
         const sentAt = data.sentAt ? new Date(data.sentAt) : new Date();
-        registerIncomingImageTransfer(data.payload.imageId, data.payload.mimeType, data.payload.totalChunks);
+        if (!registerIncomingImageTransfer(data.payload.imageId, data.payload.mimeType, data.payload.totalChunks, null)) {
+          return;
+        }
+
         appendIncomingImagePlaceholder(
           {
             from: 'admin',

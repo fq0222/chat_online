@@ -154,6 +154,12 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /imageStatus === 'loading'/);
   assert.match(frontEndSource, /image-progress/);
   assert.match(frontEndSource, /handleMessageMediaLoaded/);
+  assert.match(frontEndSource, /startSent:\s*boolean/);
+  assert.match(frontEndSource, /batch\.startConfirmed \|\| batch\.startSent/);
+  assert.match(frontEndSource, /batch\.startSent = true/);
+  assert.match(frontEndSource, /batch\.startSent = false/);
+  assert.match(frontEndSource, /hasImageMessage/);
+  assert.match(frontEndSource, /return;\s*\n\s*}\s*\n\s*\n\s*if \(page\.value === 'guest-chat'\)/);
   assert.match(frontEndSource, /message-media-loaded/);
   assert.match(frontEndSource, /@load="emit\('message-media-loaded'\)"/);
   assert.match(frontEndSource, /scrollMessageTimelineToBottom/);
