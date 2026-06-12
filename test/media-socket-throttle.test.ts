@@ -61,9 +61,10 @@ class BackpressureWebSocket {
   }
 }
 
-test('媒体 WebSocket 会在发送缓冲过高时暂停分片队列', () => {
+test('媒体 WebSocket 会在发送缓冲过高时暂停分片队列', async () => {
   const originalWebSocket = globalThis.WebSocket;
   let mediaSocket: ReturnType<typeof createMediaSocket> | null = null;
+  let sendResults: PromiseSettledResult<void>[] = [];
 
   BackpressureWebSocket.instances = [];
   Object.defineProperty(globalThis, 'WebSocket', {
@@ -78,16 +79,20 @@ test('媒体 WebSocket 会在发送缓冲过高时暂停分片队列', () => {
     });
     const socket = BackpressureWebSocket.instances[0];
 
-    for (let index = 0; index < 20; index += 1) {
-      mediaSocket.sendChunk('image-1', {
+    const sendPromises = Array.from({ length: 20 }, (_, index) =>
+      mediaSocket!.sendChunk('image-1', {
         chunkIndex: index,
         totalChunks: 20,
         data: new TextEncoder().encode('abcd').buffer
-      });
-    }
+      })
+    );
 
     assert.ok(socket.sentMessages.length < 20);
     assert.equal(socket.sentMessages.some((message) => message instanceof ArrayBuffer), true);
+    mediaSocket.close();
+    mediaSocket = null;
+    sendResults = await Promise.allSettled(sendPromises);
+    assert.equal(sendResults.some((result) => result.status === 'rejected'), true);
   } finally {
     mediaSocket?.close();
     Object.defineProperty(globalThis, 'WebSocket', {
@@ -97,7 +102,7 @@ test('媒体 WebSocket 会在发送缓冲过高时暂停分片队列', () => {
   }
 });
 
-test('媒体 WebSocket 发送图片分片时使用二进制帧承载原始字节', () => {
+test('媒体 WebSocket 发送图片分片时使用二进制帧承载原始字节', async () => {
   const originalWebSocket = globalThis.WebSocket;
   let mediaSocket: ReturnType<typeof createMediaSocket> | null = null;
 
@@ -114,7 +119,7 @@ test('媒体 WebSocket 发送图片分片时使用二进制帧承载原始字节
     });
     const socket = BackpressureWebSocket.instances[0];
 
-    mediaSocket.sendChunk('image-1', {
+    await mediaSocket.sendChunk('image-1', {
       chunkIndex: 0,
       totalChunks: 1,
       data: new TextEncoder().encode('abcd').buffer
@@ -125,6 +130,49 @@ test('媒体 WebSocket 发送图片分片时使用二进制帧承载原始字节
     assert.ok(sentFrame instanceof ArrayBuffer);
     assert.equal(socket.sentMessages.some((message) => typeof message === 'string' && message.includes('YWJjZA==')), false);
     assert.equal(new TextDecoder().decode(decodeImageChunkFrame(sentFrame).data), 'abcd');
+  } finally {
+    mediaSocket?.close();
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: originalWebSocket
+    });
+  }
+});
+
+test('媒体 WebSocket 关闭时会拒绝尚未真正发送的排队分片', async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  let mediaSocket: ReturnType<typeof createMediaSocket> | null = null;
+
+  BackpressureWebSocket.instances = [];
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: BackpressureWebSocket
+  });
+
+  try {
+    mediaSocket = createMediaSocket('wss://example.com/ws/media', {
+      onChunk: () => undefined,
+      onError: () => undefined
+    });
+    const socket = BackpressureWebSocket.instances[0];
+    const results = await Promise.allSettled(
+      Array.from({ length: 20 }, (_, index) =>
+        mediaSocket!.sendChunk('image-1', {
+          chunkIndex: index,
+          totalChunks: 20,
+          data: new TextEncoder().encode('abcd').buffer
+        })
+      ).map((promise, index) => {
+        if (index === 4) {
+          mediaSocket?.close();
+        }
+
+        return promise;
+      })
+    );
+
+    assert.ok(socket.sentMessages.length < 20);
+    assert.equal(results.some((result) => result.status === 'rejected'), true);
   } finally {
     mediaSocket?.close();
     Object.defineProperty(globalThis, 'WebSocket', {

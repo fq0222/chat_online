@@ -89,6 +89,7 @@ export function useChatOnlineApp() {
       localMessageId: string;
       startConfirmed: boolean;
       startSent: boolean;
+      flushing: boolean;
       startMessage: {
         type: 'image:start';
         clientMessageId: string;
@@ -1061,6 +1062,7 @@ export function useChatOnlineApp() {
         localMessageId: clientMessageId,
         startConfirmed: false,
         startSent: false,
+        flushing: false,
         startMessage
       });
 
@@ -1246,6 +1248,7 @@ export function useChatOnlineApp() {
     outgoingImageBatches.forEach((batch) => {
       batch.startConfirmed = false;
       batch.startSent = false;
+      batch.flushing = false;
     });
   }
 
@@ -1339,7 +1342,7 @@ export function useChatOnlineApp() {
    * 在服务端确认 image:start 后发送对应图片分片。
    * @param clientMessageId 客户端消息 ID；核心分支保证媒体分片晚于控制通道传输会话创建。
    */
-  function flushPendingImageChunks(clientMessageId: string): void {
+  async function flushPendingImageChunks(clientMessageId: string): Promise<void> {
     const batch = outgoingImageBatches.get(clientMessageId);
 
     if (!batch) {
@@ -1348,6 +1351,10 @@ export function useChatOnlineApp() {
 
     batch.startConfirmed = true;
 
+    if (batch.flushing) {
+      return;
+    }
+
     const mediaSocket = mediaSocketRef.value;
 
     if (!mediaSocket || !mediaSocket.isOpen()) {
@@ -1355,18 +1362,27 @@ export function useChatOnlineApp() {
       return;
     }
 
-    batch.chunks.forEach((chunk, index) => {
-      mediaSocket.sendChunk(batch.imageId, chunk);
+    batch.flushing = true;
+
+    try {
+      await Promise.all(
+        batch.chunks.map(async (chunk, index) => {
+          await mediaSocket.sendChunk(batch.imageId, chunk);
+          updateImageMessage(batch.imageId, {
+            imageProgress: Math.round(((index + 1) / batch.chunks.length) * 100)
+          });
+        })
+      );
       updateImageMessage(batch.imageId, {
-        imageProgress: Math.round(((index + 1) / batch.chunks.length) * 100)
+        imageUrl: batch.localDataUrl,
+        imageStatus: 'ready',
+        imageProgress: 100
       });
-    });
-    updateImageMessage(batch.imageId, {
-      imageUrl: batch.localDataUrl,
-      imageStatus: 'ready',
-      imageProgress: 100
-    });
-    outgoingImageBatches.delete(clientMessageId);
+      outgoingImageBatches.delete(clientMessageId);
+    } catch (error) {
+      batch.flushing = false;
+      imageLogger.warn(`图片分片发送中断，等待媒体通道重连后继续发送：${clientMessageId} ${(error as Error).message}`);
+    }
   }
 
   /**

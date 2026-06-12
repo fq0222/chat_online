@@ -10,6 +10,8 @@ export type MediaSocketHandlers = {
 type QueuedChunk = {
   imageId: string;
   chunk: ImageChunk;
+  resolve: () => void;
+  reject: (error: Error) => void;
 };
 
 const mediaHeartbeatMs = 25 * 1000;
@@ -90,6 +92,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
       }
 
       socket.send(encodeImageChunkFrame(item.imageId, item.chunk));
+      item.resolve();
       sentCount += 1;
     }
 
@@ -182,6 +185,11 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
   socket.addEventListener('close', () => {
     stopMediaHeartbeat();
     clearSendTimer();
+    const pendingError = new Error('媒体通道已断开，图片分片等待重连后继续发送');
+
+    while (queue.length) {
+      queue.shift()?.reject(pendingError);
+    }
 
     if (!closedByClient) {
       handlers.onClose?.();
@@ -198,9 +206,11 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
      * @param imageId 图片传输 ID。
      * @param chunk 图片分片；核心分支为连接未打开时先排队，避免阻塞文字通道。
      */
-    sendChunk(imageId: string, chunk: ImageChunk): void {
-      queue.push({ imageId, chunk });
-      flushQueue();
+    sendChunk(imageId: string, chunk: ImageChunk): Promise<void> {
+      return new Promise((resolve, reject) => {
+        queue.push({ imageId, chunk, resolve, reject });
+        flushQueue();
+      });
     },
     /**
      * 判断媒体连接是否可直接发送。
@@ -215,7 +225,6 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
      */
     close(): void {
       closedByClient = true;
-      queue.length = 0;
       clearSendTimer();
       stopMediaHeartbeat();
       socket.close();
