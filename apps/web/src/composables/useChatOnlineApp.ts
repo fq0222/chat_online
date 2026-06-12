@@ -810,7 +810,13 @@ export function useChatOnlineApp() {
     try {
       const imageBlob = dataUrlToBlob(image.dataUrl);
       const preparedChunks = await createImageChunks(imageBlob, imageChunkSize);
-      const previewDataUrl = await createImageStartPreviewDataUrl(image);
+      let previewDataUrl = '';
+
+      try {
+        previewDataUrl = await createImageStartPreviewDataUrl(image);
+      } catch (previewError) {
+        imageLogger.warn(`图片预览生成失败，改用空占位继续发送：${image.name} ${(previewError as Error).message}`);
+      }
       const clientMessageId = `${page.value === 'guest-chat' ? 'guest' : 'admin'}-image-${Date.now()}-${preparedChunks.imageId}`;
       const placeholder: ChatMessage = {
         from: page.value === 'guest-chat' ? 'guest' : 'admin',
@@ -853,7 +859,7 @@ export function useChatOnlineApp() {
           size: preparedChunks.size,
           chunkSize: preparedChunks.chunkSize,
           totalChunks: preparedChunks.totalChunks,
-          previewDataUrl
+          ...(previewDataUrl ? { previewDataUrl } : {})
         }
       });
       imageLogger.info(

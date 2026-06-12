@@ -28,7 +28,7 @@ export type ClientMessage =
         size: number;
         chunkSize: number;
         totalChunks: number;
-        previewDataUrl: string;
+        previewDataUrl?: string;
       };
     };
 
@@ -328,10 +328,10 @@ export class ChatRelayService {
    */
   private createRelayPayload(message: ClientMessage): ClientMessage['payload'] {
     if (message.type === 'image:start') {
-      const { imageId, mimeType, size, chunkSize, totalChunks, previewDataUrl } = message.payload;
+    const { imageId, mimeType, size, chunkSize, totalChunks, previewDataUrl } = message.payload;
 
-      return { imageId, mimeType, size, chunkSize, totalChunks, previewDataUrl };
-    }
+    return previewDataUrl ? { imageId, mimeType, size, chunkSize, totalChunks, previewDataUrl } : { imageId, mimeType, size, chunkSize, totalChunks };
+  }
 
     return message.payload;
   }
@@ -342,7 +342,11 @@ export class ChatRelayService {
    * @param mimeType 图片 MIME 类型。
    * @returns 校验失败文案，校验通过时返回 null。
    */
-  private validatePreviewDataUrl(previewDataUrl: string, mimeType: string): string | null {
+  private validatePreviewDataUrl(previewDataUrl: string | undefined, mimeType: string): string | null {
+    if (!previewDataUrl) {
+      return null;
+    }
+
     const prefix = `data:${mimeType};base64,`;
 
     if (!previewDataUrl.startsWith(prefix)) {

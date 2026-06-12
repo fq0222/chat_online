@@ -225,6 +225,35 @@ test('图片开始事件拒绝过大的预览图载荷', () => {
   assert.equal(errors[0].message, '图片预览过大');
 });
 
+test('图片开始事件允许没有预览图时继续转发占位消息', () => {
+  const sessions: unknown[] = [];
+  const relay = new ChatRelayService({ onImageStart: (session) => sessions.push(session) });
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+  const admin = relay.connectAdmin('room-1', 'admin-1', adminSender);
+  const guest = relay.connectGuest('room-1', guestSender);
+
+  relay.handleClientMessage(admin.connectionId, {
+    type: 'image:start',
+    clientMessageId: 'img-start-no-preview',
+    targetConnectionId: guest.connectionId,
+    payload: {
+      imageId: 'image-no-preview',
+      mimeType: 'image/jpeg',
+      size: 4096,
+      chunkSize: 1024,
+      totalChunks: 4
+    }
+  } as unknown as ClientMessage);
+
+  const messages = findEvents<{ event: string; type: string; payload: { previewDataUrl?: string } }>(guestSender, 'message:new');
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'image:start');
+  assert.equal(messages[0].payload.previewDataUrl, undefined);
+  assert.equal(sessions.length, 1);
+});
+
 test('默认允许发送 5MB 以内图片并拒绝超过限制的图片', () => {
   const relay = new ChatRelayService();
   const adminSender = new MemorySender();
