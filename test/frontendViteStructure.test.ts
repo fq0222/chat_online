@@ -209,6 +209,16 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /const conversationKey = getRoomUserConversationKey\(guest\)/);
   assert.match(frontEndSource, /roomConversations\.value\[conversationKey\]/);
   assert.match(frontEndSource, /getRoomUserActiveKey/);
+  assert.match(frontEndSource, /startConfirmed/);
+  assert.match(frontEndSource, /markPendingImageStartsUnconfirmed/);
+  assert.match(frontEndSource, /resendPendingImageStarts/);
+  assert.match(frontEndSource, /flushAllPendingImageChunks/);
+  assert.match(frontEndSource, /mediaReconnectTimerRef/);
+  assert.match(frontEndSource, /scheduleMediaSocketReconnect/);
+  assert.match(frontEndSource, /onClose:\s*\(\) =>/);
+  assert.match(frontEndSource, /const mediaSocket = mediaSocketRef\.value/);
+  assert.match(frontEndSource, /mediaSocket\.isOpen\(\)/);
+  assert.doesNotMatch(frontEndSource, /mediaSocketRef\.value\?\.sendChunk\(batch\.imageId,\s*chunk\)/);
   assert.match(frontEndSource, /toggle-chat-history-storage/);
   assert.match(frontEndSource, /type="checkbox"[\s\S]*保存记录/);
   assert.match(stylesCss, /\.chat-history-toggle\s*{/);

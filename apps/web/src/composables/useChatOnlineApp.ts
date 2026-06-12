@@ -67,6 +67,7 @@ export function useChatOnlineApp() {
   const controlConnectionId = ref('');
   const reconnectPolicy = createReconnectPolicy({ maxAttempts: Number.POSITIVE_INFINITY, delayMs: 5000 });
   const reconnectTimerRef = ref<ReturnType<typeof setTimeout> | null>(null);
+  const mediaReconnectTimerRef = ref<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = ref<number | null>(null);
   const reconnectGeneration = ref(0);
   const shouldReconnectSocket = ref(true);
@@ -81,7 +82,26 @@ export function useChatOnlineApp() {
   const toast = reactive({ message: '', type: 'plain' as StatusType });
   const outgoingImageBatches = new Map<
     string,
-    { imageId: string; chunks: ImageChunk[]; localDataUrl: string; localMessageId: string }
+    {
+      imageId: string;
+      chunks: ImageChunk[];
+      localDataUrl: string;
+      localMessageId: string;
+      startConfirmed: boolean;
+      startMessage: {
+        type: 'image:start';
+        clientMessageId: string;
+        targetConnectionId?: string;
+        payload: {
+          imageId: string;
+          mimeType: string;
+          size: number;
+          chunkSize: number;
+          totalChunks: number;
+          previewDataUrl?: string;
+        };
+      };
+    }
   >();
   const incomingImageTransfers = new Map<string, { mimeType: string; totalChunks: number; chunks: ImageChunk[] }>();
 
@@ -117,6 +137,17 @@ export function useChatOnlineApp() {
     if (reconnectTimerRef.value) {
       clearTimeout(reconnectTimerRef.value);
       reconnectTimerRef.value = null;
+    }
+  }
+
+  /**
+   * 清理媒体通道重连定时器。
+   * 核心分支：控制通道重连、主动关闭或新媒体连接建立前取消旧任务，避免旧计时器抢占新连接。
+   */
+  function clearMediaReconnectTimer(): void {
+    if (mediaReconnectTimerRef.value) {
+      clearTimeout(mediaReconnectTimerRef.value);
+      mediaReconnectTimerRef.value = null;
     }
   }
 
@@ -185,6 +216,7 @@ export function useChatOnlineApp() {
     shouldReconnectSocket.value = false;
     reconnectGeneration.value += 1;
     clearReconnectTimer();
+    clearMediaReconnectTimer();
     mediaSocketRef.value?.close();
     mediaSocketRef.value = null;
     controlConnectionId.value = '';
@@ -976,14 +1008,7 @@ export function useChatOnlineApp() {
         }
       }
 
-      outgoingImageBatches.set(clientMessageId, {
-        imageId: preparedChunks.imageId,
-        chunks: preparedChunks.chunks,
-        localDataUrl: image.dataUrl,
-        localMessageId: clientMessageId
-      });
-
-      const payload = JSON.stringify({
+      const startMessage = {
         type: 'image:start',
         clientMessageId,
         ...(targetGuestId ? { targetConnectionId: targetGuestId } : {}),
@@ -995,12 +1020,22 @@ export function useChatOnlineApp() {
           totalChunks: preparedChunks.totalChunks,
           ...(previewDataUrl ? { previewDataUrl } : {})
         }
+      } as const;
+      outgoingImageBatches.set(clientMessageId, {
+        imageId: preparedChunks.imageId,
+        chunks: preparedChunks.chunks,
+        localDataUrl: image.dataUrl,
+        localMessageId: clientMessageId,
+        startConfirmed: false,
+        startMessage
       });
+
+      const payload = JSON.stringify(startMessage);
       imageLogger.info(
         `图片开始发送：${image.name} 控制载荷 ${formatByteSize(getUtf8ByteLength(payload))} 分片 ${preparedChunks.totalChunks} ` +
           `原始 ${formatByteSize(image.originalBytes ?? 0)} 压缩 ${formatByteSize(image.compressedBytes ?? imageBlob.size)}`
       );
-      socketRef.value.send(payload);
+      resendPendingImageStarts();
     } catch (error) {
       setStatus((error as Error).message, 'error');
       imageLogger.warn(`图片发送准备失败：${image.name} ${(error as Error).message}`);
@@ -1119,14 +1154,43 @@ export function useChatOnlineApp() {
   }
 
   /**
+   * 安排媒体通道重连。
+   * @param roomId 房间 ID。
+   * @param role 当前连接角色。
+   * @param connectionId 控制通道连接 ID；核心分支只在控制通道仍是同一连接时重建媒体通道。
+   */
+  function scheduleMediaSocketReconnect(roomId: string, role: MessageFrom, connectionId: string): void {
+    if (!shouldReconnectSocket.value || controlConnectionId.value !== connectionId || socketRef.value?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    clearMediaReconnectTimer();
+    connectionStatus.value = '图片通道已断开，正在重连';
+    mediaReconnectTimerRef.value = setTimeout(() => {
+      if (!shouldReconnectSocket.value || controlConnectionId.value !== connectionId || socketRef.value?.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      connectMediaSocket(roomId, role, connectionId);
+    }, 1000);
+  }
+
+  /**
    * 连接图片媒体 WebSocket。
    * @param roomId 房间 ID。
    * @param role 当前连接角色。
    * @param connectionId 控制通道连接 ID；核心分支让媒体通道和控制通道绑定同一连接身份。
    */
   function connectMediaSocket(roomId: string, role: MessageFrom, connectionId: string): void {
+    clearMediaReconnectTimer();
     mediaSocketRef.value?.close();
     mediaSocketRef.value = createMediaSocket(buildMediaSocketUrl(roomId, role, connectionId), {
+      onOpen: () => {
+        flushAllPendingImageChunks();
+      },
+      onClose: () => {
+        scheduleMediaSocketReconnect(roomId, role, connectionId);
+      },
       onChunk: (message) => {
         void handleMediaChunk(message);
       },
@@ -1138,6 +1202,53 @@ export function useChatOnlineApp() {
         imageLogger.warn(`媒体通道错误：${message.message ?? '未知错误'}`);
       }
     });
+  }
+
+  /**
+   * 标记未完成图片需要重新确认 image:start。
+   * 核心分支：控制通道断开时服务端旧连接上的传输会话可能失效，重连后必须重新创建会话再发送媒体分片。
+   */
+  function markPendingImageStartsUnconfirmed(): void {
+    outgoingImageBatches.forEach((batch) => {
+      batch.startConfirmed = false;
+    });
+  }
+
+  /**
+   * 发送或重发未完成图片的 image:start 控制消息。
+   * 核心分支：仅在控制通道打开时发送，管理员端会刷新当前在线访客连接 ID，访客端则继续不指定目标。
+   */
+  function resendPendingImageStarts(): void {
+    if (socketRef.value?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    outgoingImageBatches.forEach((batch) => {
+      if (batch.startConfirmed) {
+        return;
+      }
+
+      if (page.value !== 'guest-chat') {
+        const targetGuestId = selectedGuestId.value;
+
+        if (!targetGuestId) {
+          return;
+        }
+
+        batch.startMessage.targetConnectionId = targetGuestId;
+      }
+
+      socketRef.value?.send(JSON.stringify(batch.startMessage));
+      imageLogger.info(`图片开始消息已发送，等待服务端确认：${batch.localMessageId}`);
+    });
+  }
+
+  /**
+   * 发送所有已被服务端确认的待发图片分片。
+   * 核心分支：媒体通道未打开时保留批次等待 onOpen 或下一次重连，避免接收端占位消息永久停在 0%。
+   */
+  function flushAllPendingImageChunks(): void {
+    [...outgoingImageBatches.keys()].forEach((clientMessageId) => flushPendingImageChunks(clientMessageId));
   }
 
   /**
@@ -1192,8 +1303,17 @@ export function useChatOnlineApp() {
       return;
     }
 
+    batch.startConfirmed = true;
+
+    const mediaSocket = mediaSocketRef.value;
+
+    if (!mediaSocket || !mediaSocket.isOpen()) {
+      imageLogger.warn(`媒体通道未就绪，图片分片等待重连后继续发送：${clientMessageId}`);
+      return;
+    }
+
     batch.chunks.forEach((chunk, index) => {
-      mediaSocketRef.value?.sendChunk(batch.imageId, chunk);
+      mediaSocket.sendChunk(batch.imageId, chunk);
       updateImageMessage(batch.imageId, {
         imageProgress: Math.round(((index + 1) / batch.chunks.length) * 100)
       });
@@ -1651,6 +1771,7 @@ export function useChatOnlineApp() {
       if (data.event === 'connection:ready' && data.connection) {
         controlConnectionId.value = data.connection.connectionId;
         connectMediaSocket(roomId, 'admin', data.connection.connectionId);
+        resendPendingImageStarts();
         return;
       }
 
@@ -1711,6 +1832,7 @@ export function useChatOnlineApp() {
     });
     socket.addEventListener('close', () => {
       stopHeartbeat?.();
+      markPendingImageStartsUnconfirmed();
       mediaSocketRef.value?.close();
       mediaSocketRef.value = null;
       scheduleSocketReconnect(
@@ -1774,6 +1896,7 @@ export function useChatOnlineApp() {
       if (data.event === 'connection:ready' && data.connection) {
         controlConnectionId.value = data.connection.connectionId;
         connectMediaSocket(roomId, 'guest', data.connection.connectionId);
+        resendPendingImageStarts();
         return;
       }
 
@@ -1833,6 +1956,7 @@ export function useChatOnlineApp() {
     });
     socket.addEventListener('close', () => {
       stopHeartbeat?.();
+      markPendingImageStartsUnconfirmed();
       mediaSocketRef.value?.close();
       mediaSocketRef.value = null;
       scheduleSocketReconnect(

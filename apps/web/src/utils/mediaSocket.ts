@@ -1,6 +1,8 @@
 import type { ImageChunk } from './imageChunkTransfer';
 
 export type MediaSocketHandlers = {
+  onOpen?: () => void;
+  onClose?: () => void;
   onChunk: (message: { imageId: string; chunkIndex: number; totalChunks: number; data: string }) => void;
   onError: (message: { imageId?: string; message?: string }) => void;
 };
@@ -22,6 +24,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
   const socket = new WebSocket(url);
   const queue: QueuedChunk[] = [];
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let closedByClient = false;
 
   /**
    * 发送已排队的图片分片。
@@ -72,8 +75,15 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
   socket.addEventListener('open', () => {
     flushQueue();
     startMediaHeartbeat();
+    handlers.onOpen?.();
   });
-  socket.addEventListener('close', stopMediaHeartbeat);
+  socket.addEventListener('close', () => {
+    stopMediaHeartbeat();
+
+    if (!closedByClient) {
+      handlers.onClose?.();
+    }
+  });
   socket.addEventListener('message', (event) => {
     const data = JSON.parse(event.data) as {
       event: string;
@@ -121,6 +131,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
      * 核心分支：页面切换或控制通道重连时调用，避免旧媒体连接继续发送分片。
      */
     close(): void {
+      closedByClient = true;
       queue.length = 0;
       stopMediaHeartbeat();
       socket.close();

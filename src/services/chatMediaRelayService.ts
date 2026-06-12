@@ -77,11 +77,10 @@ export class ChatMediaRelayService {
 
   /**
    * 移除媒体连接。
-   * @param connectionId 媒体连接 ID；核心分支只移除连接，不影响文字控制通道。
+   * @param connectionId 媒体连接 ID；核心分支只移除连接，保留短暂传输会话等待同一控制连接重建媒体通道。
    */
   disconnectMedia(connectionId: string): void {
     this.connections.delete(connectionId);
-    this.cleanupTransfersForConnection(connectionId);
   }
 
   /**
@@ -232,18 +231,6 @@ export class ChatMediaRelayService {
     }
 
     return Buffer.byteLength(data, 'base64');
-  }
-
-  /**
-   * 清理指定连接相关的传输会话。
-   * @param connectionId 已断开的媒体连接 ID；核心分支同时清理发送方和接收方关联会话。
-   */
-  private cleanupTransfersForConnection(connectionId: string): void {
-    [...this.transfers.entries()].forEach(([imageId, transfer]) => {
-      if (transfer.fromConnectionId === connectionId || transfer.toConnectionId === connectionId) {
-        this.transfers.delete(imageId);
-      }
-    });
   }
 
   /**

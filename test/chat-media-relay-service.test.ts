@@ -209,7 +209,7 @@ test('媒体服务拒绝超过声明大小的分片', () => {
   assert.equal(oversizedTotal.message, '图片累计大小超过限制');
 });
 
-test('媒体连接断开和传输超时会清理相关会话', () => {
+test('媒体连接短暂断开不会清理传输会话并在重连后补发分片', () => {
   let now = 1000;
   const media = new ChatMediaRelayService({ now: () => now, maxSessionIdleMs: 100 });
   const adminSender = new MemorySender();
@@ -229,17 +229,27 @@ test('媒体连接断开和传输超时会清理相关会话', () => {
   });
   media.disconnectMedia(guest.connectionId);
 
-  const disconnectedResult = media.handleChunk(admin.connectionId, {
+  const pendingResult = media.handleChunk(admin.connectionId, {
     type: 'image:chunk',
     imageId: 'image-1',
     chunkIndex: 0,
     totalChunks: 1,
     data: btoa('abcd')
   });
-  assert.equal(disconnectedResult.ok, false);
-  assert.equal(disconnectedResult.message, '图片传输不存在');
+  assert.deepEqual(pendingResult, { ok: true, complete: true, receivedChunks: 1, totalChunks: 1 });
+  assert.equal(guestSender.messages.length, 0);
 
   media.connectMedia({ connectionId: 'guest-1', roomId: 'room-1', role: 'guest' }, guestSender);
+  assert.deepEqual(guestSender.messages, [
+    {
+      event: 'image:chunk',
+      imageId: 'image-1',
+      chunkIndex: 0,
+      totalChunks: 1,
+      data: btoa('abcd')
+    }
+  ]);
+
   media.startTransfer({
     imageId: 'image-2',
     roomId: 'room-1',
