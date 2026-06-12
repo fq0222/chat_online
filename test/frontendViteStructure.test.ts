@@ -258,6 +258,7 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
 test('后端必须挂载独立图片媒体 WebSocket 通道', () => {
   const mediaServer = fs.readFileSync(path.join(root, 'src/ws/mediaServer.ts'), 'utf8');
   const chatServer = fs.readFileSync(path.join(root, 'src/ws/chatServer.ts'), 'utf8');
+  const serverHeartbeat = fs.readFileSync(path.join(root, 'src/ws/serverHeartbeat.ts'), 'utf8');
   const serverTs = fs.readFileSync(path.join(root, 'src/server.ts'), 'utf8');
   const appRuntime = readWebSource('composables/useChatOnlineApp.ts');
   const mediaSocket = readWebSource('utils/mediaSocket.ts');
@@ -266,16 +267,20 @@ test('后端必须挂载独立图片媒体 WebSocket 通道', () => {
   assert.match(mediaServer, /chatMediaRelayService/);
   assert.match(mediaServer, /connectionId/);
   assert.match(chatServer, /connection:ready/);
-  assert.match(chatServer, /socket\.ping\(\)/);
+  assert.match(chatServer, /attachServerHeartbeat/);
+  assert.match(chatServer, /heartbeat\.markAlive\(\)/);
   assert.match(chatServer, /event:\s*'pong'/);
   assert.match(chatServer, /socket\.on\('close', \(code, reason\)/);
   assert.match(chatServer, /bufferedAmount/);
   assert.match(chatServer, /socket\.on\('error'/);
-  assert.match(mediaServer, /socket\.ping\(\)/);
+  assert.match(mediaServer, /attachServerHeartbeat/);
+  assert.match(mediaServer, /heartbeat\.markAlive\(\)/);
   assert.match(mediaServer, /event:\s*'pong'/);
   assert.match(mediaServer, /socket\.on\('close', \(code, reason\)/);
   assert.match(mediaServer, /bufferedAmount/);
   assert.match(mediaServer, /socket\.on\('error'/);
+  assert.match(serverHeartbeat, /socket\.ping\(\)/);
+  assert.match(serverHeartbeat, /socket\.on\('pong', markAlive\)/);
   assert.match(appRuntime, /startSocketHeartbeat/);
   assert.match(appRuntime, /type:\s*'ping'/);
   assert.match(mediaSocket, /startMediaHeartbeat/);

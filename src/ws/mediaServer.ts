@@ -6,9 +6,9 @@ import type { ChatMediaRelayService, ImageChunkMessage } from '../services/chatM
 import type { ChatRelayService } from '../services/chatRelayService';
 import type { RoomService } from '../services/roomService';
 import { createLogger } from '../utils/logger';
+import { attachServerHeartbeat } from './serverHeartbeat';
 
 const logger = createLogger('媒体转发');
-const websocketHeartbeatMs = 25 * 1000;
 
 type MediaUpgradeContext = {
   roomId: string;
@@ -16,32 +16,6 @@ type MediaUpgradeContext = {
   connectionId: string;
   adminSession?: AuthSession;
 };
-
-/**
- * 为媒体 WebSocket 添加协议层心跳。
- * @param socket WebSocket 连接；核心分支为定时 ping，连续无 pong 时终止僵尸连接。
- * @returns 清理心跳定时器的方法。
- */
-function attachServerHeartbeat(socket: WebSocket): () => void {
-  let isAlive = true;
-  const heartbeatTimer = setInterval(() => {
-    if (!isAlive) {
-      socket.terminate();
-      return;
-    }
-
-    isAlive = false;
-    socket.ping();
-  }, websocketHeartbeatMs);
-
-  socket.on('pong', () => {
-    isAlive = true;
-  });
-
-  return () => {
-    clearInterval(heartbeatTimer);
-  };
-}
 
 /**
  * 格式化媒体 WebSocket 关闭原因。
@@ -120,7 +94,7 @@ export function attachMediaServer(
   });
 
   wsServer.on('connection', (socket: WebSocket, _request: IncomingMessage, context: MediaUpgradeContext) => {
-    const stopHeartbeat = attachServerHeartbeat(socket);
+    const heartbeat = attachServerHeartbeat(socket);
     const sender = { send: (message: string) => socket.send(message) };
     const connection = dependencies.chatMediaRelayService.connectMedia(
       { connectionId: context.connectionId, roomId: context.roomId, role: context.role },
@@ -128,6 +102,8 @@ export function attachMediaServer(
     );
 
     socket.on('message', (rawMessage) => {
+      heartbeat.markAlive();
+
       try {
         const message = JSON.parse(rawMessage.toString()) as ImageChunkMessage;
 
@@ -151,7 +127,7 @@ export function attachMediaServer(
     });
 
     socket.on('close', (code, reason) => {
-      stopHeartbeat();
+      heartbeat.stop();
       dependencies.chatMediaRelayService.disconnectMedia(connection.connectionId);
       logger.info(
         `媒体连接已断开：${connection.roomId} ${connection.role} code=${code} reason=${formatCloseReason(reason)} bufferedAmount=${socket.bufferedAmount}`
