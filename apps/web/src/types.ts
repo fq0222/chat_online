@@ -38,6 +38,10 @@ export type ChatMessage = {
   time: string;
   imageUrl?: string;
   mimeType?: string;
+  imageId?: string;
+  imageStatus?: 'loading' | 'ready' | 'failed';
+  imageProgress?: number;
+  previewUrl?: string;
 };
 
 export type RelayRoomUser = {

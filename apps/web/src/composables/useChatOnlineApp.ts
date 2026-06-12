@@ -3,7 +3,9 @@ import type { ComponentPublicInstance } from 'vue';
 import { createDraftSendQueue } from '../utils/chatDraftOrder';
 import { createChatHistoryStorage } from '../utils/chatHistoryStorage';
 import { createFrontendLogger } from '../utils/frontendLogger';
+import { assembleImageChunks, createImageChunks, dataUrlToBlob, type ImageChunk } from '../utils/imageChunkTransfer';
 import { compressImageFileForChat, readBlobAsDataUrl } from '../utils/imageCompression';
+import { createMediaSocket } from '../utils/mediaSocket';
 import { getPageTitle } from '../utils/pageTitle';
 import { isPageActive, playIncomingMessageSound, shouldPlayIncomingMessageSound } from '../utils/messageSound';
 import { createReconnectPolicy } from '../utils/websocketReconnect';
@@ -37,6 +39,8 @@ export function useChatOnlineApp() {
   };
   const supportedImageMimeTypes = ['image/png', 'image/jpeg', 'image/webp'];
   const maxImageBytes = 1024 * 1024 * 5;
+  const maxImagePreviewBytes = 1024 * 64;
+  const imageChunkSize = 1024 * 32;
   const maxPendingImages = 5;
 
   const loginForm = reactive({ username: '', password: '' });
@@ -56,6 +60,8 @@ export function useChatOnlineApp() {
   const chatHistoryEnabled = ref(localStorage.getItem(storageKeys.guestChatHistoryEnabled) === 'on');
   const activeGuestId = ref('');
   const socketRef = ref<WebSocket | null>(null);
+  const mediaSocketRef = ref<ReturnType<typeof createMediaSocket> | null>(null);
+  const controlConnectionId = ref('');
   const reconnectPolicy = createReconnectPolicy({ maxAttempts: 3, delayMs: 5000 });
   const reconnectTimerRef = ref<ReturnType<typeof setTimeout> | null>(null);
   const reconnectGeneration = ref(0);
@@ -68,6 +74,11 @@ export function useChatOnlineApp() {
   const roomUsers = ref<RoomUser[]>([]);
   const roomConversations = ref<Record<string, ChatMessage[]>>({});
   const chatMessages = ref<ChatMessage[]>([]);
+  const outgoingImageBatches = new Map<
+    string,
+    { imageId: string; chunks: ImageChunk[]; localDataUrl: string; localMessageId: string }
+  >();
+  const incomingImageTransfers = new Map<string, { mimeType: string; totalChunks: number; chunks: ImageChunk[] }>();
 
   /**
    * 接收聊天消息滚动容器 DOM 引用。
@@ -158,6 +169,9 @@ export function useChatOnlineApp() {
     shouldReconnectSocket.value = false;
     reconnectGeneration.value += 1;
     clearReconnectTimer();
+    mediaSocketRef.value?.close();
+    mediaSocketRef.value = null;
+    controlConnectionId.value = '';
     socketRef.value?.close();
     socketRef.value = null;
   }
@@ -510,30 +524,118 @@ export function useChatOnlineApp() {
   }
 
   /**
-   * 写入当前客服主动发送的图片消息。
-   * @param dataUrl 图片 dataURL。
-   * @param mimeType 图片 MIME 类型；核心分支会同步写入当前访客会话和最近消息排序。
-   * @returns 是否成功写入。
+   * 写入当前客服主动发送的图片占位消息。
+   * @param image 图片占位消息；核心分支会同步写入当前访客会话和最近消息排序。
+   * @returns 写入成功时返回目标访客连接 ID，否则返回空字符串。
    */
-  function appendCurrentAdminImage(dataUrl: string, mimeType: string): boolean {
+  function appendCurrentAdminImage(image: ChatMessage): string {
     const targetGuestId = selectedGuestId.value;
 
     if (!targetGuestId) {
       setStatus('请先在左侧选择一位访客。', 'error');
-      return false;
+      return '';
     }
 
     const now = new Date();
-    const time = formatMessageTime(now);
+    const time = image.time || formatMessageTime(now);
     const messages = roomConversations.value[targetGuestId] ?? [];
     roomConversations.value = {
       ...roomConversations.value,
-      [targetGuestId]: [...messages, { from: 'admin', text: '[图片消息]', time, imageUrl: dataUrl, mimeType }]
+      [targetGuestId]: [...messages, { ...image, time }]
     };
     touchRoomUserMessage(targetGuestId, time, now.getTime());
     scrollToLatestReadMessage();
 
-    return true;
+    return targetGuestId;
+  }
+
+  /**
+   * 更新指定图片消息的状态。
+   * @param imageId 图片传输 ID。
+   * @param patch 要合并到消息上的状态字段；核心分支同时扫描访客端消息和管理端各会话。
+   */
+  function updateImageMessage(imageId: string, patch: Partial<ChatMessage>): void {
+    chatMessages.value = chatMessages.value.map((message) => (message.imageId === imageId ? { ...message, ...patch } : message));
+    roomConversations.value = Object.fromEntries(
+      Object.entries(roomConversations.value).map(([guestId, messages]) => [
+        guestId,
+        messages.map((message) => (message.imageId === imageId ? { ...message, ...patch } : message))
+      ])
+    );
+  }
+
+  /**
+   * 写入远端图片占位消息。
+   * @param message 图片消息；核心分支按当前页面角色写入访客时间线或管理端对应访客会话。
+   * @param from 发送方连接摘要，管理端用于定位访客会话。
+   * @param sentAt 服务端发送时间。
+   */
+  function appendIncomingImagePlaceholder(message: ChatMessage, from: RelayRoomUser | null, sentAt: Date): void {
+    if (page.value === 'guest-chat') {
+      chatMessages.value.push(message);
+      persistGuestChatHistory(guestRoom.value?.id ?? '');
+      scrollToLatestReadMessage();
+      return;
+    }
+
+    if (from) {
+      appendAdminConversationMessage(from, message, sentAt);
+    }
+  }
+
+  /**
+   * 生成控制通道使用的轻量图片预览。
+   * @param image 待发送图片；核心分支优先复用小图，大图会降采样到较小画布，避免控制通道发送完整正文。
+   * @returns 体积符合后端限制的 preview dataURL。
+   */
+  async function createImageStartPreviewDataUrl(image: PendingImage): Promise<string> {
+    const originalBlob = dataUrlToBlob(image.dataUrl);
+
+    if (originalBlob.size <= maxImagePreviewBytes) {
+      return image.dataUrl;
+    }
+
+    const bitmap = await createImageBitmap(originalBlob);
+    const maxPreviewSide = 160;
+    const scale = Math.min(1, maxPreviewSide / bitmap.width, maxPreviewSide / bitmap.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+      bitmap.close?.();
+      throw new Error('图片预览生成失败');
+    }
+
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+
+    const previewBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+            return;
+          }
+
+          reject(new Error('图片预览生成失败'));
+        },
+        image.mimeType,
+        0.52
+      );
+    });
+    const previewDataUrl = await readBlobAsDataUrl(previewBlob);
+
+    if (!previewDataUrl.startsWith(`data:${image.mimeType};base64,`)) {
+      throw new Error('图片预览格式不支持，请换一张图片');
+    }
+
+    if (new Blob([previewDataUrl]).size > maxImagePreviewBytes) {
+      throw new Error('图片预览仍然过大，请换一张图片');
+    }
+
+    return previewDataUrl;
   }
 
   /**
@@ -689,54 +791,79 @@ export function useChatOnlineApp() {
 
   /**
    * 发送待发送图片。
-   * @param image 图片草稿；核心分支为访客发给管理员，管理员发给当前选中的访客。
+   * @param image 图片草稿；核心分支为先走控制通道发送 image:start，服务端 ack 后再通过媒体通道发送分片。
    */
   function sendPendingImage(image: PendingImage): void {
-    if (page.value === 'guest-chat') {
-      chatMessages.value.push({
-        from: 'guest',
+    void sendPendingImageChunks(image);
+  }
+
+  /**
+   * 准备并发送图片分片。
+   * @param image 图片草稿；核心分支会避免完整 dataURL 进入控制通道。
+   */
+  async function sendPendingImageChunks(image: PendingImage): Promise<void> {
+    if (socketRef.value?.readyState !== WebSocket.OPEN || !mediaSocketRef.value) {
+      setStatus('实时服务尚未连接，图片发送失败。', 'error');
+      return;
+    }
+
+    try {
+      const imageBlob = dataUrlToBlob(image.dataUrl);
+      const preparedChunks = await createImageChunks(imageBlob, imageChunkSize);
+      const previewDataUrl = await createImageStartPreviewDataUrl(image);
+      const clientMessageId = `${page.value === 'guest-chat' ? 'guest' : 'admin'}-image-${Date.now()}-${preparedChunks.imageId}`;
+      const placeholder: ChatMessage = {
+        from: page.value === 'guest-chat' ? 'guest' : 'admin',
         text: '[图片消息]',
         time: formatMessageTime(),
-        imageUrl: image.dataUrl,
-        mimeType: image.mimeType
-      });
-      persistGuestChatHistory(guestRoom.value?.id ?? '');
-      scrollToLatestReadMessage();
+        mimeType: preparedChunks.mimeType,
+        imageId: preparedChunks.imageId,
+        imageStatus: 'loading',
+        imageProgress: 0,
+        previewUrl: image.dataUrl
+      };
+      let targetGuestId = '';
 
-      if (socketRef.value?.readyState === WebSocket.OPEN) {
-        const payload = JSON.stringify({
-          type: 'image',
-          clientMessageId: `guest-image-${Date.now()}`,
-          payload: { mimeType: image.mimeType, dataUrl: image.dataUrl }
-        });
-        imageLogger.info(
-          `访客图片开始发送：${image.name} 载荷 ${formatByteSize(getUtf8ByteLength(payload))} ` +
-            `原始 ${formatByteSize(image.originalBytes ?? 0)} 压缩 ${formatByteSize(image.compressedBytes ?? image.dataUrl.length)}`
-        );
-        socketRef.value.send(payload);
+      if (page.value === 'guest-chat') {
+        chatMessages.value.push(placeholder);
+        persistGuestChatHistory(guestRoom.value?.id ?? '');
+        scrollToLatestReadMessage();
+      } else {
+        targetGuestId = appendCurrentAdminImage(placeholder);
+
+        if (!targetGuestId) {
+          return;
+        }
       }
 
-      return;
-    }
+      outgoingImageBatches.set(clientMessageId, {
+        imageId: preparedChunks.imageId,
+        chunks: preparedChunks.chunks,
+        localDataUrl: image.dataUrl,
+        localMessageId: clientMessageId
+      });
 
-    if (!appendCurrentAdminImage(image.dataUrl, image.mimeType)) {
-      return;
-    }
-
-    const targetGuestId = selectedGuestId.value;
-
-    if (socketRef.value?.readyState === WebSocket.OPEN && targetGuestId) {
       const payload = JSON.stringify({
-        type: 'image',
-        clientMessageId: `admin-image-${Date.now()}`,
-        targetConnectionId: targetGuestId,
-        payload: { mimeType: image.mimeType, dataUrl: image.dataUrl }
+        type: 'image:start',
+        clientMessageId,
+        ...(targetGuestId ? { targetConnectionId: targetGuestId } : {}),
+        payload: {
+          imageId: preparedChunks.imageId,
+          mimeType: preparedChunks.mimeType,
+          size: preparedChunks.size,
+          chunkSize: preparedChunks.chunkSize,
+          totalChunks: preparedChunks.totalChunks,
+          previewDataUrl
+        }
       });
       imageLogger.info(
-        `客服图片开始发送：${image.name} 载荷 ${formatByteSize(getUtf8ByteLength(payload))} ` +
-          `原始 ${formatByteSize(image.originalBytes ?? 0)} 压缩 ${formatByteSize(image.compressedBytes ?? image.dataUrl.length)}`
+        `图片开始发送：${image.name} 控制载荷 ${formatByteSize(getUtf8ByteLength(payload))} 分片 ${preparedChunks.totalChunks} ` +
+          `原始 ${formatByteSize(image.originalBytes ?? 0)} 压缩 ${formatByteSize(image.compressedBytes ?? imageBlob.size)}`
       );
       socketRef.value.send(payload);
+    } catch (error) {
+      setStatus((error as Error).message, 'error');
+      imageLogger.warn(`图片发送准备失败：${image.name} ${(error as Error).message}`);
     }
   }
 
@@ -810,6 +937,112 @@ export function useChatOnlineApp() {
    */
   function getToken(): string {
     return localStorage.getItem(storageKeys.token) ?? '';
+  }
+
+  /**
+   * 创建媒体通道地址。
+   * @param roomId 房间 ID。
+   * @param role 当前连接角色；核心分支为管理员携带 token，访客不携带 token。
+   * @param connectionId 控制通道连接 ID，用于服务端校验媒体连接归属。
+   * @returns 媒体 WebSocket 地址。
+   */
+  function buildMediaSocketUrl(roomId: string, role: MessageFrom, connectionId: string): string {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const params = new URLSearchParams({ role, roomId, connectionId });
+
+    if (role === 'admin') {
+      params.set('token', getToken());
+    }
+
+    return `${protocol}//${window.location.host}/ws/media?${params.toString()}`;
+  }
+
+  /**
+   * 连接图片媒体 WebSocket。
+   * @param roomId 房间 ID。
+   * @param role 当前连接角色。
+   * @param connectionId 控制通道连接 ID；核心分支让媒体通道和控制通道绑定同一连接身份。
+   */
+  function connectMediaSocket(roomId: string, role: MessageFrom, connectionId: string): void {
+    mediaSocketRef.value?.close();
+    mediaSocketRef.value = createMediaSocket(buildMediaSocketUrl(roomId, role, connectionId), {
+      onChunk: (message) => {
+        void handleMediaChunk(message);
+      },
+      onError: (message) => {
+        if (message.imageId) {
+          updateImageMessage(message.imageId, { imageStatus: 'failed' });
+        }
+
+        imageLogger.warn(`媒体通道错误：${message.message ?? '未知错误'}`);
+      }
+    });
+  }
+
+  /**
+   * 登记即将接收的远端图片分片。
+   * @param imageId 图片传输 ID。
+   * @param mimeType 图片 MIME 类型。
+   * @param totalChunks 总分片数；核心分支为后续分片合成保存轻量元数据。
+   */
+  function registerIncomingImageTransfer(imageId: string, mimeType: string, totalChunks: number): void {
+    incomingImageTransfers.set(imageId, { mimeType, totalChunks, chunks: [] });
+  }
+
+  /**
+   * 处理媒体通道收到的图片分片。
+   * @param message 图片分片消息；核心分支为去重、更新进度，并在收齐后合成 blob URL。
+   */
+  async function handleMediaChunk(message: { imageId: string; chunkIndex: number; totalChunks: number; data: string }): Promise<void> {
+    const transfer = incomingImageTransfers.get(message.imageId);
+
+    if (!transfer) {
+      return;
+    }
+
+    if (!transfer.chunks.some((chunk) => chunk.chunkIndex === message.chunkIndex)) {
+      transfer.chunks.push({ chunkIndex: message.chunkIndex, totalChunks: message.totalChunks, data: message.data });
+    }
+
+    const progress = Math.min(99, Math.round((transfer.chunks.length / transfer.totalChunks) * 100));
+    updateImageMessage(message.imageId, { imageProgress: progress });
+
+    if (transfer.chunks.length !== transfer.totalChunks) {
+      return;
+    }
+
+    const blob = await assembleImageChunks(transfer.chunks, transfer.mimeType);
+    incomingImageTransfers.delete(message.imageId);
+    updateImageMessage(message.imageId, {
+      imageUrl: URL.createObjectURL(blob),
+      imageStatus: 'ready',
+      imageProgress: 100
+    });
+  }
+
+  /**
+   * 在服务端确认 image:start 后发送对应图片分片。
+   * @param clientMessageId 客户端消息 ID；核心分支保证媒体分片晚于控制通道传输会话创建。
+   */
+  function flushPendingImageChunks(clientMessageId: string): void {
+    const batch = outgoingImageBatches.get(clientMessageId);
+
+    if (!batch) {
+      return;
+    }
+
+    batch.chunks.forEach((chunk, index) => {
+      mediaSocketRef.value?.sendChunk(batch.imageId, chunk);
+      updateImageMessage(batch.imageId, {
+        imageProgress: Math.round(((index + 1) / batch.chunks.length) * 100)
+      });
+    });
+    updateImageMessage(batch.imageId, {
+      imageUrl: batch.localDataUrl,
+      imageStatus: 'ready',
+      imageProgress: 100
+    });
+    outgoingImageBatches.delete(clientMessageId);
   }
 
   /**
@@ -1085,7 +1318,7 @@ export function useChatOnlineApp() {
 
   /**
    * 发送客服消息。
-   * 核心分支：文字和待发送图片都统一由发送按钮提交；同时存在图片和文字时先发送图片，再发送文字。
+   * 核心分支：文字和待发送图片都统一由发送按钮提交；文字走控制通道，图片走控制通道加媒体分片通道。
    */
   function sendMessage(): void {
     const queue = createDraftSendQueue(messageInput.value, [...pendingImages.value]);
@@ -1171,14 +1404,28 @@ export function useChatOnlineApp() {
     socket.addEventListener('message', (event) => {
       const data = JSON.parse(event.data) as {
         event: string;
-        type?: 'text' | 'image';
+        type?: 'text' | 'image' | 'image:start';
         sentAt?: string;
         from?: RelayRoomUser;
+        connection?: RelayRoomUser;
         users?: RelayRoomUser[];
-        payload?: { text?: string; mimeType?: string; dataUrl?: string };
+        payload?: {
+          text?: string;
+          mimeType?: string;
+          dataUrl?: string;
+          imageId?: string;
+          previewDataUrl?: string;
+          totalChunks?: number;
+        };
         message?: string;
         clientMessageId?: string;
       };
+
+      if (data.event === 'connection:ready' && data.connection) {
+        controlConnectionId.value = data.connection.connectionId;
+        connectMediaSocket(roomId, 'admin', data.connection.connectionId);
+        return;
+      }
 
       if (data.event === 'room:users' && data.users) {
         syncRoomUsers(data.users);
@@ -1192,6 +1439,9 @@ export function useChatOnlineApp() {
 
       if (data.event === 'message:ack') {
         imageLogger.info(`服务端已确认消息：${data.clientMessageId ?? '未提供客户端消息 ID'}`);
+        if (data.clientMessageId) {
+          flushPendingImageChunks(data.clientMessageId);
+        }
         return;
       }
 
@@ -1206,6 +1456,24 @@ export function useChatOnlineApp() {
         );
       }
       notifyIncomingMessage(activeGuestId.value === data.from.connectionId);
+      if (data.type === 'image:start' && data.payload?.imageId && data.payload.mimeType && data.payload.totalChunks) {
+        registerIncomingImageTransfer(data.payload.imageId, data.payload.mimeType, data.payload.totalChunks);
+        appendIncomingImagePlaceholder(
+          {
+            from: 'guest',
+            text: '[图片消息]',
+            time: formatMessageTime(sentAt),
+            mimeType: data.payload.mimeType,
+            imageId: data.payload.imageId,
+            imageStatus: 'loading',
+            imageProgress: 0,
+            previewUrl: data.payload.previewDataUrl
+          },
+          data.from,
+          sentAt
+        );
+        return;
+      }
       appendAdminConversationMessage(data.from, {
         from: 'guest',
         text: data.payload?.text ?? '[图片消息]',
@@ -1215,6 +1483,8 @@ export function useChatOnlineApp() {
       }, sentAt);
     });
     socket.addEventListener('close', () => {
+      mediaSocketRef.value?.close();
+      mediaSocketRef.value = null;
       scheduleSocketReconnect(
         generation,
         () => connectChatSocket(roomId),
@@ -1247,12 +1517,26 @@ export function useChatOnlineApp() {
     socket.addEventListener('message', (event) => {
       const data = JSON.parse(event.data) as {
         event: string;
-        type?: 'text' | 'image';
+        type?: 'text' | 'image' | 'image:start';
         sentAt?: string;
-        payload?: { text?: string; mimeType?: string; dataUrl?: string };
+        connection?: RelayRoomUser;
+        payload?: {
+          text?: string;
+          mimeType?: string;
+          dataUrl?: string;
+          imageId?: string;
+          previewDataUrl?: string;
+          totalChunks?: number;
+        };
         message?: string;
         clientMessageId?: string;
       };
+
+      if (data.event === 'connection:ready' && data.connection) {
+        controlConnectionId.value = data.connection.connectionId;
+        connectMediaSocket(roomId, 'guest', data.connection.connectionId);
+        return;
+      }
 
       if (data.event === 'message:error') {
         setStatus(data.message ?? '消息发送失败', 'error');
@@ -1261,6 +1545,9 @@ export function useChatOnlineApp() {
 
       if (data.event === 'message:ack') {
         imageLogger.info(`服务端已确认消息：${data.clientMessageId ?? '未提供客户端消息 ID'}`);
+        if (data.clientMessageId) {
+          flushPendingImageChunks(data.clientMessageId);
+        }
         return;
       }
 
@@ -1272,6 +1559,27 @@ export function useChatOnlineApp() {
         imageLogger.info(
           `访客端收到客服图片：${data.payload?.mimeType ?? '未知类型'} ${formatByteSize(getUtf8ByteLength(data.payload?.dataUrl ?? ''))}`
         );
+      }
+      if (data.type === 'image:start' && data.payload?.imageId && data.payload.mimeType && data.payload.totalChunks) {
+        const sentAt = data.sentAt ? new Date(data.sentAt) : new Date();
+        registerIncomingImageTransfer(data.payload.imageId, data.payload.mimeType, data.payload.totalChunks);
+        appendIncomingImagePlaceholder(
+          {
+            from: 'admin',
+            text: '[图片消息]',
+            time: formatMessageTime(sentAt),
+            mimeType: data.payload.mimeType,
+            imageId: data.payload.imageId,
+            imageStatus: 'loading',
+            imageProgress: 0,
+            previewUrl: data.payload.previewDataUrl
+          },
+          null,
+          sentAt
+        );
+        persistGuestChatHistory(guestRoom.value?.id ?? roomId);
+        notifyIncomingMessage(true);
+        return;
       }
       chatMessages.value.push({
         from: 'admin',
@@ -1285,6 +1593,8 @@ export function useChatOnlineApp() {
       scrollToLatestReadMessage();
     });
     socket.addEventListener('close', () => {
+      mediaSocketRef.value?.close();
+      mediaSocketRef.value = null;
       scheduleSocketReconnect(
         generation,
         () => connectGuestChatSocket(roomId),

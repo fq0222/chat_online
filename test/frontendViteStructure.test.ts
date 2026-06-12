@@ -69,7 +69,10 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
     'pages/AdminLoginPage.vue',
     'pages/RoomManagerPage.vue',
     'pages/AdminChatWindowPage.vue',
-    'pages/GuestChatWindowPage.vue'
+    'pages/GuestChatWindowPage.vue',
+    'utils/mediaSocket.ts',
+    'utils/imageChunkTransfer.ts',
+    'types.ts'
   ]);
   const stylesCss = fs.readFileSync(path.join(root, 'apps/web/src/styles.css'), 'utf8');
 
@@ -117,7 +120,12 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /compressImageFileForChat/);
   assert.match(frontEndSource, /createFrontendLogger/);
   assert.match(frontEndSource, /图片压缩完成/);
-  assert.match(frontEndSource, /type:\s*'image'/);
+  assert.match(frontEndSource, /createMediaSocket/);
+  assert.match(frontEndSource, /imageStatus/);
+  assert.match(frontEndSource, /imageProgress/);
+  assert.match(frontEndSource, /image:start/);
+  assert.match(frontEndSource, /image:chunk/);
+  assert.doesNotMatch(frontEndSource, /type:\s*'image'[\s\S]*dataUrl:\s*image\.dataUrl/);
   assert.match(frontEndSource, /message-image/);
   assert.match(frontEndSource, /previewImage/);
   assert.match(frontEndSource, /openImagePreview/);
@@ -132,7 +140,9 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /message\.from === 'admin'" class="avatar">管<\/span>/);
   assert.match(frontEndSource, /请勿刷新网页，刷新后聊天记录会被清空，服务器不保存。/);
   assert.match(frontEndSource, /class="guest-refresh-warning"/);
-  assert.match(frontEndSource, /chatMessages\.value\.push\(\{[\s\S]*mimeType:[\s\S]*\}\);\s*persistGuestChatHistory\(guestRoom\.value\?\.id \?\? ''\);\s*scrollToLatestReadMessage\(\);/);
+  assert.match(frontEndSource, /appendIncomingImagePlaceholder/);
+  assert.match(frontEndSource, /previewUrl/);
+  assert.match(frontEndSource, /persistGuestChatHistory\(guestRoom\.value\?\.id \?\? ''\)/);
   assert.match(stylesCss, /\.guest-chat-page\s*{[^}]*display:\s*grid[^}]*place-items:\s*center/s);
   assert.match(stylesCss, /\.guest-chat-shell\s*{[^}]*grid-template-rows:\s*64px minmax\(0,\s*1fr\) 192px/s);
   assert.match(stylesCss, /\.guest-refresh-warning\s*{[^}]*color:\s*#dc2626/s);

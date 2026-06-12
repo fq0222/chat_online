@@ -28,7 +28,11 @@ function isChatMessage(value: unknown): value is ChatMessage {
     typeof message.text === 'string' &&
     typeof message.time === 'string' &&
     (message.imageUrl === undefined || typeof message.imageUrl === 'string') &&
-    (message.mimeType === undefined || typeof message.mimeType === 'string')
+    (message.mimeType === undefined || typeof message.mimeType === 'string') &&
+    (message.imageId === undefined || typeof message.imageId === 'string') &&
+    (message.imageStatus === undefined || ['loading', 'ready', 'failed'].includes(message.imageStatus)) &&
+    (message.imageProgress === undefined || typeof message.imageProgress === 'number') &&
+    (message.previewUrl === undefined || typeof message.previewUrl === 'string')
   );
 }
 
