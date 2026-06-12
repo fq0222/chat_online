@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createMediaSocket } from '../apps/web/src/utils/mediaSocket';
 import { decodeImageChunkFrame } from '../apps/web/src/utils/imageChunkTransfer';
 
-type FakeSocketListener = () => void;
+type FakeSocketListener = (event?: { data: string | ArrayBuffer }) => void;
 
 /**
  * 测试用 WebSocket 替身。
@@ -56,8 +56,8 @@ class BackpressureWebSocket {
    * 触发已注册的事件。
    * @param event 事件名称；核心分支按注册顺序执行监听器。
    */
-  emit(event: string): void {
-    this.listeners.get(event)?.forEach((listener) => listener());
+  emit(event: string, data?: string | ArrayBuffer): void {
+    this.listeners.get(event)?.forEach((listener) => listener(data === undefined ? undefined : { data }));
   }
 }
 
@@ -119,7 +119,7 @@ test('媒体 WebSocket 发送图片分片时使用二进制帧承载原始字节
     });
     const socket = BackpressureWebSocket.instances[0];
 
-    await mediaSocket.sendChunk('image-1', {
+    const sentPromise = mediaSocket.sendChunk('image-1', {
       chunkIndex: 0,
       totalChunks: 1,
       data: new TextEncoder().encode('abcd').buffer
@@ -130,6 +130,82 @@ test('媒体 WebSocket 发送图片分片时使用二进制帧承载原始字节
     assert.ok(sentFrame instanceof ArrayBuffer);
     assert.equal(socket.sentMessages.some((message) => typeof message === 'string' && message.includes('YWJjZA==')), false);
     assert.equal(new TextDecoder().decode(decodeImageChunkFrame(sentFrame).data), 'abcd');
+    socket.emit('message', JSON.stringify({ event: 'image:chunk:ack', imageId: 'image-1', chunkIndex: 0 }));
+    await sentPromise;
+  } finally {
+    mediaSocket?.close();
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: originalWebSocket
+    });
+  }
+});
+
+test('媒体 WebSocket 分片必须等服务端确认后才算发送完成', async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  let mediaSocket: ReturnType<typeof createMediaSocket> | null = null;
+
+  BackpressureWebSocket.instances = [];
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: BackpressureWebSocket
+  });
+
+  try {
+    mediaSocket = createMediaSocket('wss://example.com/ws/media', {
+      onChunk: () => undefined,
+      onError: () => undefined
+    });
+    const socket = BackpressureWebSocket.instances[0];
+    let resolved = false;
+    const sentPromise = mediaSocket
+      .sendChunk('image-ack', {
+        chunkIndex: 0,
+        totalChunks: 1,
+        data: new TextEncoder().encode('abcd').buffer
+      })
+      .then(() => {
+        resolved = true;
+      });
+
+    await Promise.resolve();
+    assert.equal(resolved, false);
+
+    socket.emit('message', JSON.stringify({ event: 'image:chunk:ack', imageId: 'image-ack', chunkIndex: 0 }));
+    await sentPromise;
+    assert.equal(resolved, true);
+  } finally {
+    mediaSocket?.close();
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: originalWebSocket
+    });
+  }
+});
+
+test('媒体 WebSocket 关闭时会拒绝已发送但未确认的分片', async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  let mediaSocket: ReturnType<typeof createMediaSocket> | null = null;
+
+  BackpressureWebSocket.instances = [];
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: BackpressureWebSocket
+  });
+
+  try {
+    mediaSocket = createMediaSocket('wss://example.com/ws/media', {
+      onChunk: () => undefined,
+      onError: () => undefined
+    });
+    const promise = mediaSocket.sendChunk('image-unacked', {
+      chunkIndex: 0,
+      totalChunks: 1,
+      data: new TextEncoder().encode('abcd').buffer
+    });
+
+    mediaSocket.close();
+    await assert.rejects(promise, /媒体通道已断开/);
   } finally {
     mediaSocket?.close();
     Object.defineProperty(globalThis, 'WebSocket', {

@@ -143,7 +143,10 @@ export function attachMediaServer(
 
         if (!result.ok) {
           socket.send(JSON.stringify({ event: 'image:error', imageId: message.imageId, message: result.message }));
+          return;
         }
+
+        socket.send(JSON.stringify({ event: 'image:chunk:ack', imageId: message.imageId, chunkIndex: message.chunkIndex }));
       } catch {
         socket.send(JSON.stringify({ event: 'image:error', message: '图片分片格式错误' }));
       }

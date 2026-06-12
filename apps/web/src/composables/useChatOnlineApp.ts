@@ -1381,7 +1381,10 @@ export function useChatOnlineApp() {
       outgoingImageBatches.delete(clientMessageId);
     } catch (error) {
       batch.flushing = false;
+      batch.startConfirmed = false;
+      batch.startSent = false;
       imageLogger.warn(`图片分片发送中断，等待媒体通道重连后继续发送：${clientMessageId} ${(error as Error).message}`);
+      resendPendingImageStarts();
     }
   }
 

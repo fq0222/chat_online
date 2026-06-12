@@ -226,6 +226,10 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /const mediaSocket = mediaSocketRef\.value/);
   assert.match(frontEndSource, /mediaSocket\.isOpen\(\)/);
   assert.doesNotMatch(frontEndSource, /mediaSocketRef\.value\?\.sendChunk\(batch\.imageId,\s*chunk\)/);
+  assert.match(
+    frontEndSource,
+    /catch \(error\) \{[\s\S]*batch\.startConfirmed = false;[\s\S]*batch\.startSent = false;[\s\S]*图片分片发送中断[\s\S]*resendPendingImageStarts\(\)/
+  );
   assert.match(frontEndSource, /toggle-chat-history-storage/);
   assert.match(frontEndSource, /type="checkbox"[\s\S]*保存记录/);
   assert.match(stylesCss, /\.chat-history-toggle\s*{/);
@@ -276,6 +280,7 @@ test('后端必须挂载独立图片媒体 WebSocket 通道', () => {
   assert.match(mediaServer, /attachServerHeartbeat/);
   assert.match(mediaServer, /heartbeat\.markAlive\(\)/);
   assert.match(mediaServer, /event:\s*'pong'/);
+  assert.match(mediaServer, /event:\s*'image:chunk:ack'/);
   assert.match(mediaServer, /socket\.on\('close', \(code, reason\)/);
   assert.match(mediaServer, /bufferedAmount/);
   assert.match(mediaServer, /socket\.on\('error'/);

@@ -21,6 +21,16 @@ const mediaSendBatchSize = 4;
 const mediaSendPumpDelayMs = 16;
 
 /**
+ * 创建分片确认键。
+ * @param imageId 图片传输 ID。
+ * @param chunkIndex 分片序号。
+ * @returns 可用于匹配服务端 ack 的唯一键。
+ */
+function createChunkAckKey(imageId: string, chunkIndex: number): string {
+  return `${imageId}:${chunkIndex}`;
+}
+
+/**
  * 创建图片媒体 WebSocket 客户端。
  * @param url 媒体 WebSocket 地址。
  * @param handlers 媒体事件处理器；核心分支为接收图片分片和错误事件。
@@ -30,6 +40,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
   const socket = new WebSocket(url);
   socket.binaryType = 'arraybuffer';
   const queue: QueuedChunk[] = [];
+  const inFlightChunks = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let sendTimer: ReturnType<typeof setTimeout> | null = null;
   let closedByClient = false;
@@ -92,7 +103,10 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
       }
 
       socket.send(encodeImageChunkFrame(item.imageId, item.chunk));
-      item.resolve();
+      inFlightChunks.set(createChunkAckKey(item.imageId, item.chunk.chunkIndex), {
+        resolve: item.resolve,
+        reject: item.reject
+      });
       sentCount += 1;
     }
 
@@ -162,6 +176,7 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
       const data = JSON.parse(event.data) as {
         event: string;
         imageId?: string;
+        chunkIndex?: number;
         message?: string;
       };
 
@@ -171,6 +186,16 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
 
       if (data.event === 'image:error') {
         handlers.onError({ imageId: data.imageId, message: data.message });
+      }
+
+      if (data.event === 'image:chunk:ack' && data.imageId && typeof data.chunkIndex === 'number') {
+        const ackKey = createChunkAckKey(data.imageId, data.chunkIndex);
+        const pendingChunk = inFlightChunks.get(ackKey);
+
+        if (pendingChunk) {
+          inFlightChunks.delete(ackKey);
+          pendingChunk.resolve();
+        }
       }
     } catch (error) {
       handlers.onError({ message: (error as Error).message });
@@ -190,6 +215,9 @@ export function createMediaSocket(url: string, handlers: MediaSocketHandlers) {
     while (queue.length) {
       queue.shift()?.reject(pendingError);
     }
+
+    inFlightChunks.forEach((chunk) => chunk.reject(pendingError));
+    inFlightChunks.clear();
 
     if (!closedByClient) {
       handlers.onClose?.();
