@@ -1354,7 +1354,7 @@ export function useChatOnlineApp() {
   /**
    * 复制分享链接。
    * @param room 要复制访客链接的聊天室。
-   * 核心分支：优先使用 Clipboard API，失败时回退到 execCommand，并在当前行展示复制结果。
+   * 核心分支：优先使用 Clipboard API，失败时回退到 execCommand，并用 toast 展示复制结果，避免挤压聊天输入区。
    */
   async function copyShareUrl(room: RoomInfo): Promise<void> {
     try {
@@ -1365,7 +1365,7 @@ export function useChatOnlineApp() {
       }
 
       copiedRoomId.value = room.id;
-      setStatus('分享链接已复制。', 'success');
+      showToast('分享链接已复制。', 'success');
       window.setTimeout(() => {
         if (copiedRoomId.value === room.id) {
           copiedRoomId.value = '';
@@ -1373,7 +1373,7 @@ export function useChatOnlineApp() {
       }, 1800);
     } catch (error) {
       copiedRoomId.value = '';
-      setStatus((error as Error).message, 'error');
+      showToast((error as Error).message, 'error');
     }
   }
 

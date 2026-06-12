@@ -131,6 +131,8 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(frontEndSource, /:status="status"/);
   assert.match(frontEndSource, /status:\s*\{\s*message:\s*string;\s*type:\s*StatusType\s*\}/);
   assert.match(frontEndSource, /class="status-text chat-status"/);
+  assert.match(frontEndSource, /showToast\('分享链接已复制。',\s*'success'\)/);
+  assert.doesNotMatch(frontEndSource, /setStatus\('分享链接已复制。',\s*'success'\)/);
   assert.match(frontEndSource, /file\.name \|\| '这张图片'/);
   assert.match(frontEndSource, /不能超过 5MB/);
   assert.match(frontEndSource, /image:start/);
