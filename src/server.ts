@@ -25,8 +25,10 @@ export function startServer(): http.Server {
   const adminService = new AdminService(new PostgresAdminRepository(pool));
   const authService = new AuthService(adminService, config.bootstrapAdmin, config.auth);
   const roomService = new RoomService(new PostgresRoomRepository(pool), config.site);
-  const chatRelayService = new ChatRelayService();
   const chatMediaRelayService = new ChatMediaRelayService();
+  const chatRelayService = new ChatRelayService({
+    onImageStart: (session) => chatMediaRelayService.startTransfer(session)
+  });
   const app = createApp({ adminService, authService, roomService });
   const server = http.createServer(app);
 

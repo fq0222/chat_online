@@ -163,6 +163,68 @@ test('图片开始事件不阻塞后续文字消息转发', () => {
   assert.equal(adminMessages[1].payload.text, '图片还在传，这条文字要先到');
 });
 
+test('图片开始事件会创建媒体传输会话', () => {
+  const sessions: unknown[] = [];
+  const relay = new ChatRelayService({ onImageStart: (session) => sessions.push(session) });
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+  const admin = relay.connectAdmin('room-1', 'admin-1', adminSender);
+  const guest = relay.connectGuest('room-1', guestSender);
+
+  relay.handleClientMessage(admin.connectionId, {
+    type: 'image:start',
+    clientMessageId: 'img-start-session',
+    targetConnectionId: guest.connectionId,
+    payload: {
+      imageId: 'image-session',
+      mimeType: 'image/webp',
+      size: 4096,
+      chunkSize: 1024,
+      totalChunks: 4,
+      previewDataUrl: 'data:image/webp;base64,cHJldmlldw=='
+    }
+  });
+
+  assert.deepEqual(sessions, [
+    {
+      imageId: 'image-session',
+      roomId: 'room-1',
+      fromConnectionId: admin.connectionId,
+      toConnectionId: guest.connectionId,
+      totalChunks: 4,
+      chunkSize: 1024,
+      size: 4096
+    }
+  ]);
+});
+
+test('图片开始事件拒绝过大的预览图载荷', () => {
+  const relay = new ChatRelayService({ maxPreviewBytes: 4 });
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+  const admin = relay.connectAdmin('room-1', 'admin-1', adminSender);
+  const guest = relay.connectGuest('room-1', guestSender);
+
+  relay.handleClientMessage(admin.connectionId, {
+    type: 'image:start',
+    clientMessageId: 'img-start-preview',
+    targetConnectionId: guest.connectionId,
+    payload: {
+      imageId: 'image-preview',
+      mimeType: 'image/png',
+      size: 4096,
+      chunkSize: 1024,
+      totalChunks: 4,
+      previewDataUrl: `data:image/png;base64,${Buffer.alloc(5).toString('base64')}`
+    }
+  });
+
+  const errors = findEvents<{ event: string; message: string }>(adminSender, 'message:error');
+
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].message, '图片预览过大');
+});
+
 test('默认允许发送 5MB 以内图片并拒绝超过限制的图片', () => {
   const relay = new ChatRelayService();
   const adminSender = new MemorySender();

@@ -51,6 +51,16 @@ type InternalConnection = RelayConnection & {
 type ChatRelayOptions = {
   now?: () => Date;
   maxImageBytes?: number;
+  maxPreviewBytes?: number;
+  onImageStart?: (session: {
+    imageId: string;
+    roomId: string;
+    fromConnectionId: string;
+    toConnectionId: string;
+    totalChunks: number;
+    chunkSize: number;
+    size: number;
+  }) => void;
 };
 
 /**
@@ -74,10 +84,14 @@ export class ChatRelayService {
   private readonly connections = new Map<string, InternalConnection>();
   private readonly now: () => Date;
   private readonly maxImageBytes: number;
+  private readonly maxPreviewBytes: number;
+  private readonly onImageStart?: ChatRelayOptions['onImageStart'];
 
   constructor(options: ChatRelayOptions = {}) {
     this.now = options.now ?? (() => new Date());
     this.maxImageBytes = options.maxImageBytes ?? 1024 * 1024 * 5;
+    this.maxPreviewBytes = options.maxPreviewBytes ?? 1024 * 64;
+    this.onImageStart = options.onImageStart;
   }
 
   /**
@@ -193,6 +207,18 @@ export class ChatRelayService {
       payload: this.createRelayPayload(message)
     };
 
+    if (message.type === 'image:start') {
+      this.onImageStart?.({
+        imageId: message.payload.imageId,
+        roomId: sender.roomId,
+        fromConnectionId: sender.connectionId,
+        toConnectionId: target.connectionId,
+        totalChunks: message.payload.totalChunks,
+        chunkSize: message.payload.chunkSize,
+        size: message.payload.size
+      });
+    }
+
     target.sender.send(JSON.stringify(relayMessage));
     this.sendEvent(sender, 'message:ack', { clientMessageId: message.clientMessageId });
 
@@ -252,7 +278,7 @@ export class ChatRelayService {
     }
 
     if (message.type === 'image:start') {
-      const { imageId, mimeType, size, chunkSize, totalChunks } = message.payload;
+      const { imageId, mimeType, size, chunkSize, totalChunks, previewDataUrl } = message.payload;
 
       if (!imageId.trim()) {
         return '图片 ID 不能为空';
@@ -278,7 +304,7 @@ export class ChatRelayService {
         return '图片分片数量不匹配';
       }
 
-      return null;
+      return this.validatePreviewDataUrl(previewDataUrl, mimeType);
     }
 
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(message.payload.mimeType)) {
@@ -308,6 +334,32 @@ export class ChatRelayService {
     }
 
     return message.payload;
+  }
+
+  /**
+   * 校验图片开始事件里的轻量预览图。
+   * @param previewDataUrl 预览图 dataURL；核心分支限制 MIME 与图片一致且体积足够小，避免控制通道重新承载完整图片。
+   * @param mimeType 图片 MIME 类型。
+   * @returns 校验失败文案，校验通过时返回 null。
+   */
+  private validatePreviewDataUrl(previewDataUrl: string, mimeType: string): string | null {
+    const prefix = `data:${mimeType};base64,`;
+
+    if (!previewDataUrl.startsWith(prefix)) {
+      return '图片预览格式不合法';
+    }
+
+    const base64 = previewDataUrl.slice(prefix.length);
+
+    if (!base64 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0) {
+      return '图片预览格式不合法';
+    }
+
+    if (Buffer.byteLength(base64, 'base64') > this.maxPreviewBytes) {
+      return '图片预览过大';
+    }
+
+    return null;
   }
 
   private sendEvent(connection: InternalConnection, event: string, payload: Record<string, unknown>): void {
