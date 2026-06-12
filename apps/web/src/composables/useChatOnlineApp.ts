@@ -333,15 +333,52 @@ export function useChatOnlineApp() {
   }
 
   /**
+   * 即时把聊天区滚动到最新消息。
+   * @param timeline 聊天滚动容器；核心分支会临时关闭平滑滚动，避免图片撑高时停在旧的 scrollHeight。
+   */
+  function scrollMessageTimelineToBottom(timeline: HTMLElement): void {
+    const previousScrollBehavior = timeline.style.scrollBehavior;
+    timeline.style.scrollBehavior = 'auto';
+    timeline.scrollTop = timeline.scrollHeight;
+    timeline.style.scrollBehavior = previousScrollBehavior;
+  }
+
+  /**
+   * 安排聊天区滚动到底部。
+   * @param extraFrames 额外校正帧数；核心分支用于覆盖图片加载后布局连续变化的场景。
+   */
+  function scheduleMessageTimelineBottomScroll(extraFrames = 1): void {
+    const timeline = messageTimelineRef.value;
+
+    if (!timeline) {
+      return;
+    }
+
+    scrollMessageTimelineToBottom(timeline);
+
+    if (extraFrames <= 0) {
+      return;
+    }
+
+    requestAnimationFrame(() => scheduleMessageTimelineBottomScroll(extraFrames - 1));
+  }
+
+  /**
    * 把聊天区滚动到最新消息。
    * 核心分支：当前聚焦会话默认已读，因此新消息或主动发送后定位到最新已读位置。
    */
-  function scrollToLatestReadMessage(): void {
+  function scrollToLatestReadMessage(extraFrames = 1): void {
     void nextTick(() => {
-      if (messageTimelineRef.value) {
-        messageTimelineRef.value.scrollTop = messageTimelineRef.value.scrollHeight;
-      }
+      scheduleMessageTimelineBottomScroll(extraFrames);
     });
+  }
+
+  /**
+   * 处理消息图片或预览图完成加载。
+   * 核心分支：图片加载会让消息高度二次增长，需要再次滚动到底，避免发送端和接收端停在图片中间。
+   */
+  function handleMessageMediaLoaded(): void {
+    scrollToLatestReadMessage(3);
   }
 
   /**
@@ -665,12 +702,14 @@ export function useChatOnlineApp() {
    * @returns 校验失败文案，校验通过时返回空字符串。
    */
   function getImageFileError(file: File): string {
+    const fileName = file.name || '这张图片';
+
     if (!supportedImageMimeTypes.includes(file.type)) {
-      return '仅支持 PNG、JPG、WEBP 图片。';
+      return `${fileName} 格式不支持，仅支持 PNG、JPG、WEBP 图片。`;
     }
 
     if (file.size > maxImageBytes) {
-      return '图片大小不能超过 5MB。';
+      return `${fileName} 不能超过 5MB，请换一张更小的图片。`;
     }
 
     return '';
@@ -1739,6 +1778,7 @@ export function useChatOnlineApp() {
     closeImagePreview,
     openImagePicker,
     handleImageSelect,
-    handleComposerPaste
+    handleComposerPaste,
+    handleMessageMediaLoaded
   };
 }

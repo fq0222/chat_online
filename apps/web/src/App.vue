@@ -51,7 +51,8 @@ const {
   closeImagePreview,
   openImagePicker,
   handleImageSelect,
-  handleComposerPaste
+  handleComposerPaste,
+  handleMessageMediaLoaded
 } = useChatOnlineApp();
 </script>
 
@@ -120,6 +121,7 @@ const {
     :active-room="activeRoom"
     :copied-room-id="copiedRoomId"
     :connection-status="connectionStatus"
+    :status="status"
     :sound-reminder-enabled="soundReminderEnabled"
     :room-user-list="roomUserList"
     :active-guest-id="activeGuestId"
@@ -140,6 +142,7 @@ const {
     @open-image-picker="openImagePicker"
     @image-select="handleImageSelect"
     @composer-paste="handleComposerPaste"
+    @message-media-loaded="handleMessageMediaLoaded"
     @send-message="sendMessage"
   />
 
@@ -147,6 +150,7 @@ const {
     v-else
     v-model:message-input="messageInput"
     :connection-status="connectionStatus"
+    :status="status"
     :sound-reminder-enabled="soundReminderEnabled"
     :chat-history-enabled="chatHistoryEnabled"
     :chat-messages="activeConversationMessages"
@@ -161,6 +165,7 @@ const {
     @open-image-picker="openImagePicker"
     @image-select="handleImageSelect"
     @composer-paste="handleComposerPaste"
+    @message-media-loaded="handleMessageMediaLoaded"
     @send-message="sendMessage"
   />
 

@@ -35,6 +35,7 @@ type InternalMediaConnection = MediaConnection & {
 type InternalImageTransferSession = ImageTransferSession & {
   receivedChunks: Set<number>;
   receivedBytesByChunk: Map<number, number>;
+  pendingChunks: Map<number, ImageChunkMessage>;
   updatedAt: number;
 };
 
@@ -70,6 +71,7 @@ export class ChatMediaRelayService {
    */
   connectMedia(connection: MediaConnection, sender: MediaSender): MediaConnection {
     this.connections.set(connection.connectionId, { ...connection, sender });
+    this.flushPendingChunksForConnection(connection.connectionId);
     return connection;
   }
 
@@ -92,6 +94,7 @@ export class ChatMediaRelayService {
       ...session,
       receivedChunks: new Set<number>(),
       receivedBytesByChunk: new Map<number, number>(),
+      pendingChunks: new Map<number, ImageChunkMessage>(),
       updatedAt: this.now()
     });
   }
@@ -140,29 +143,28 @@ export class ChatMediaRelayService {
       return { ok: false, message: '图片累计大小超过限制' };
     }
 
-    const target = this.connections.get(transfer.toConnectionId);
+    const isNewChunk = !transfer.receivedChunks.has(message.chunkIndex);
 
-    if (!target) {
-      this.transfers.delete(message.imageId);
-      return { ok: false, message: '图片接收方已离线' };
+    if (isNewChunk) {
+      transfer.receivedChunks.add(message.chunkIndex);
+      transfer.receivedBytesByChunk.set(message.chunkIndex, chunkBytes);
     }
 
-    transfer.receivedChunks.add(message.chunkIndex);
-    transfer.receivedBytesByChunk.set(message.chunkIndex, chunkBytes);
     transfer.updatedAt = this.now();
-    target.sender.send(
-      JSON.stringify({
-        event: 'image:chunk',
-        imageId: message.imageId,
-        chunkIndex: message.chunkIndex,
-        totalChunks: message.totalChunks,
-        data: message.data
-      })
-    );
+
+    if (isNewChunk) {
+      const target = this.connections.get(transfer.toConnectionId);
+
+      if (target) {
+        this.sendChunkToTarget(target, message);
+      } else {
+        transfer.pendingChunks.set(message.chunkIndex, message);
+      }
+    }
 
     const complete = transfer.receivedChunks.size === transfer.totalChunks;
 
-    if (complete) {
+    if (complete && transfer.pendingChunks.size === 0) {
       this.transfers.delete(message.imageId);
     }
 
@@ -172,6 +174,51 @@ export class ChatMediaRelayService {
       receivedChunks: transfer.receivedChunks.size,
       totalChunks: transfer.totalChunks
     };
+  }
+
+  /**
+   * 向接收方媒体连接发送图片分片。
+   * @param target 接收方媒体连接；核心分支只发送单个已校验分片，不修改传输会话状态。
+   * @param message 已通过校验的图片分片消息。
+   */
+  private sendChunkToTarget(target: InternalMediaConnection, message: ImageChunkMessage): void {
+    target.sender.send(
+      JSON.stringify({
+        event: 'image:chunk',
+        imageId: message.imageId,
+        chunkIndex: message.chunkIndex,
+        totalChunks: message.totalChunks,
+        data: message.data
+      })
+    );
+  }
+
+  /**
+   * 补发指定接收方媒体连接建立前暂存的图片分片。
+   * @param connectionId 刚建立的媒体连接 ID；核心分支只处理以该连接为接收方的传输会话，补发完成且收齐后清理会话。
+   */
+  private flushPendingChunksForConnection(connectionId: string): void {
+    const target = this.connections.get(connectionId);
+
+    if (!target) {
+      return;
+    }
+
+    [...this.transfers.entries()].forEach(([imageId, transfer]) => {
+      if (transfer.toConnectionId !== connectionId || !transfer.pendingChunks.size) {
+        return;
+      }
+
+      [...transfer.pendingChunks.values()]
+        .sort((left, right) => left.chunkIndex - right.chunkIndex)
+        .forEach((message) => this.sendChunkToTarget(target, message));
+      transfer.pendingChunks.clear();
+      transfer.updatedAt = this.now();
+
+      if (transfer.receivedChunks.size === transfer.totalChunks) {
+        this.transfers.delete(imageId);
+      }
+    });
   }
 
   /**

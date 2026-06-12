@@ -45,6 +45,47 @@ test('图片分片通过媒体服务转发给目标媒体连接', () => {
   });
 });
 
+test('接收方媒体连接稍后建立时会收到已经到达的图片分片', () => {
+  const media = new ChatMediaRelayService({ now: () => 1000 });
+  const adminSender = new MemorySender();
+  const guestSender = new MemorySender();
+
+  const admin = media.connectMedia({ connectionId: 'admin-1', roomId: 'room-1', role: 'admin' }, adminSender);
+
+  media.startTransfer({
+    imageId: 'image-late-target',
+    roomId: 'room-1',
+    fromConnectionId: admin.connectionId,
+    toConnectionId: 'guest-1',
+    totalChunks: 2,
+    chunkSize: 4,
+    size: 8
+  });
+
+  const firstResult = media.handleChunk(admin.connectionId, {
+    type: 'image:chunk',
+    imageId: 'image-late-target',
+    chunkIndex: 0,
+    totalChunks: 2,
+    data: btoa('abcd')
+  });
+
+  assert.deepEqual(firstResult, { ok: true, complete: false, receivedChunks: 1, totalChunks: 2 });
+  assert.equal(guestSender.messages.length, 0);
+
+  media.connectMedia({ connectionId: 'guest-1', roomId: 'room-1', role: 'guest' }, guestSender);
+
+  assert.deepEqual(guestSender.messages, [
+    {
+      event: 'image:chunk',
+      imageId: 'image-late-target',
+      chunkIndex: 0,
+      totalChunks: 2,
+      data: btoa('abcd')
+    }
+  ]);
+});
+
 test('媒体服务拒绝越界分片且不影响其他传输', () => {
   const media = new ChatMediaRelayService({ now: () => 1000 });
   const adminSender = new MemorySender();

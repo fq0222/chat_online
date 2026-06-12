@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ComponentPublicInstance } from 'vue';
-import type { ChatMessage, PendingImage, RoomInfo, RoomUser } from '../types';
+import type { ChatMessage, PendingImage, RoomInfo, RoomUser, StatusType } from '../types';
 
 /**
  * 管理端聊天窗口页。
@@ -11,6 +11,7 @@ defineProps<{
   activeRoom: RoomInfo | null;
   copiedRoomId: string;
   connectionStatus: string;
+  status: { message: string; type: StatusType };
   soundReminderEnabled: boolean;
   roomUserList: RoomUser[];
   activeGuestId: string;
@@ -35,6 +36,7 @@ const emit = defineEmits<{
   (event: 'open-image-picker'): void;
   (event: 'image-select', value: Event): void;
   (event: 'composer-paste', value: ClipboardEvent): void;
+  (event: 'message-media-loaded'): void;
   (event: 'send-message'): void;
   (event: 'update:messageInput', value: string): void;
 }>();
@@ -129,10 +131,10 @@ function updateMessageInput(event: Event): void {
               <span class="message-time">{{ message.time }}</span>
               <div class="message-bubble" :class="{ image: message.imageUrl || message.imageStatus }">
                 <button v-if="message.imageUrl" class="message-image-button" type="button" @click="emit('open-image-preview', message)">
-                  <img class="message-image" :src="message.imageUrl" :alt="message.text" />
+                  <img class="message-image" :src="message.imageUrl" :alt="message.text" @load="emit('message-media-loaded')" />
                 </button>
                 <div v-else-if="message.imageStatus === 'loading'" class="message-image-placeholder">
-                  <img v-if="message.previewUrl" class="message-image preview" :src="message.previewUrl" :alt="message.text" />
+                  <img v-if="message.previewUrl" class="message-image preview" :src="message.previewUrl" :alt="message.text" @load="emit('message-media-loaded')" />
                   <span class="image-progress">图片加载中 {{ message.imageProgress ?? 0 }}%</span>
                 </div>
                 <div v-else-if="message.imageStatus === 'failed'" class="message-image-placeholder failed">
@@ -147,6 +149,7 @@ function updateMessageInput(event: Event): void {
           <div v-if="!activeGuestId" class="empty-chat-state">请选择左侧访客查看聊天内容。</div>
         </div>
         <footer class="composer">
+          <p v-if="status.message" class="status-text chat-status" :class="status.type" role="status">{{ status.message }}</p>
           <form class="message-form" @submit.prevent="emit('send-message')">
             <div class="composer-input-wrap">
               <div v-if="pendingImages.length" class="image-preview-list">

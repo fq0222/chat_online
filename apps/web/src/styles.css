@@ -1078,6 +1078,12 @@ textarea:focus {
   padding: 16px 22px 18px;
 }
 
+.chat-status {
+  min-height: 18px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
 .message-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 64px;
