@@ -50,7 +50,7 @@ function updateMessageInput(event: Event): void {
     <section class="guest-chat-shell" aria-label="访客聊天室">
       <header class="guest-header">
         <div>
-          <span class="brand-mark small">CO</span>
+          <img class="brand-mark small" src="/favicon.svg" alt="" aria-hidden="true" />
           <strong>在线客服</strong>
         </div>
         <p class="guest-refresh-warning">

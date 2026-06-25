@@ -69,7 +69,7 @@ function getRoomUserActiveKey(user: RoomUser): string {
     <section class="chat-workspace" aria-label="客服聊天室工作台">
       <aside class="room-side" aria-label="当前聊天室信息">
         <div class="workspace-brand">
-          <span class="brand-mark small">CO</span>
+          <img class="brand-mark small" src="/favicon.svg" alt="" aria-hidden="true" />
           <div>
             <strong class="room-title-remark">房间 {{ activeRoom?.remarkName || (activeRoomId ? activeRoomId.slice(0, 8) : '未选择') }}</strong>
             <span>{{ connectionStatus }}</span>

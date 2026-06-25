@@ -107,7 +107,7 @@ const {
 <main v-else-if="page === 'settings'" class="admin-page" data-page="admin-settings">
     <header class="topbar">
       <a class="brand-link" :href="buildAdminPath('rooms')" aria-label="聊天室管理">
-        <span class="brand-mark small">CO</span>
+        <img class="brand-mark small" src="/favicon.svg" alt="" aria-hidden="true" />
         <strong>Chat Online</strong>
       </a>
       <nav class="top-actions" aria-label="管理端导航">

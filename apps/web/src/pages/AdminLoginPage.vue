@@ -22,7 +22,7 @@ const emit = defineEmits<{
 <main class="auth-shell" data-page="admin-login">
     <section class="auth-layout" aria-labelledby="loginTitle">
       <div class="auth-visual">
-        <div class="brand-mark">CO</div>
+        <img class="brand-mark" src="/favicon.svg" alt="Chat Online" />
         <p class="eyebrow">Chat Online 管理端</p>
         <h1 id="loginTitle">把访客会话稳稳接住</h1>
         <p class="auth-copy">登录后可创建聊天室、复制访客入口，并在 PC 工作台集中处理实时消息。</p>
