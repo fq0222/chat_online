@@ -1,7 +1,9 @@
 import http from 'node:http';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import express from 'express';
 import { createApp } from '../src/app';
+import { createAuthRouter } from '../src/routes/authRoutes';
 import { AdminService, type AdminRecord, type AdminRepository } from '../src/services/adminService';
 import { AuthService } from '../src/services/authService';
 
@@ -59,6 +61,32 @@ async function withServer(handler: (baseUrl: string) => Promise<void>): Promise<
   }
 }
 
+async function withAuthServer(
+  adminEntryKey: string,
+  handler: (baseUrl: string) => Promise<void>
+): Promise<void> {
+  const adminService = new AdminService(new MemoryAdminRepository());
+  const authService = new AuthService(adminService, { username: 'root', password: 'root123' });
+  const app = express();
+  app.use(express.json());
+  app.use('/api/auth', createAuthRouter(authService, undefined, { adminEntryKey }));
+  const server = http.createServer(app);
+
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+
+  try {
+    const address = server.address();
+
+    if (!address || typeof address === 'string') {
+      throw new Error('测试服务启动失败');
+    }
+
+    await handler(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+}
+
 test('登录接口返回管理员 token 和初始化标记', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/auth/login`, {
@@ -72,6 +100,32 @@ test('登录接口返回管理员 token 和初始化标记', async () => {
     assert.equal(body.requiresSetup, true);
     assert.equal(body.admin.username, 'root');
     assert.equal(typeof body.token, 'string');
+  });
+});
+
+test('登录接口启用隐藏入口后必须校验 32 位入口 key', async () => {
+  const adminEntryKey = '0123456789abcdef0123456789abcdef';
+
+  await withAuthServer(adminEntryKey, async (baseUrl) => {
+    const missingResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'root', password: 'root123' })
+    });
+    const wrongResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-admin-entry-key': 'ffffffffffffffffffffffffffffffff' },
+      body: JSON.stringify({ username: 'root', password: 'root123' })
+    });
+    const okResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-admin-entry-key': adminEntryKey },
+      body: JSON.stringify({ username: 'root', password: 'root123' })
+    });
+
+    assert.equal(missingResponse.status, 404);
+    assert.equal(wrongResponse.status, 404);
+    assert.equal(okResponse.status, 200);
   });
 });
 

@@ -29,7 +29,7 @@ export function startServer(): http.Server {
   const chatRelayService = new ChatRelayService({
     onImageStart: (session) => chatMediaRelayService.startTransfer(session)
   });
-  const app = createApp({ adminService, authService, roomService });
+  const app = createApp({ adminService, authService, roomService, adminEntryKey: config.auth.adminEntryKey });
   const server = http.createServer(app);
 
   attachChatServer(server, { roomService, authService, chatRelayService });

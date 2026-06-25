@@ -36,6 +36,7 @@ function readWebSourceBundle(relativePaths: string[]): string {
 test('前端页面必须从 App.vue 拆分为独立页面组件', () => {
   const appVue = readWebSource('App.vue');
   const pageComponents = [
+    'pages/PublicRoomsPage.vue',
     'pages/AdminLoginPage.vue',
     'pages/RoomManagerPage.vue',
     'pages/AdminChatWindowPage.vue',
@@ -46,10 +47,12 @@ test('前端页面必须从 App.vue 拆分为独立页面组件', () => {
     assert.equal(fs.existsSync(path.join(webSrcRoot, componentPath)), true);
   });
 
+  assert.match(appVue, /import PublicRoomsPage from '\.\/pages\/PublicRoomsPage\.vue'/);
   assert.match(appVue, /import AdminLoginPage from '\.\/pages\/AdminLoginPage\.vue'/);
   assert.match(appVue, /import RoomManagerPage from '\.\/pages\/RoomManagerPage\.vue'/);
   assert.match(appVue, /import AdminChatWindowPage from '\.\/pages\/AdminChatWindowPage\.vue'/);
   assert.match(appVue, /import GuestChatWindowPage from '\.\/pages\/GuestChatWindowPage\.vue'/);
+  assert.match(appVue, /<PublicRoomsPage/);
   assert.match(appVue, /<AdminLoginPage/);
   assert.match(appVue, /<RoomManagerPage/);
   assert.match(appVue, /<AdminChatWindowPage/);
@@ -89,11 +92,16 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(viteConfig, /['"]\/ws\/media['"]/);
   assert.match(frontEndSource, /\/admin\/settings/);
   assert.match(frontEndSource, /\/admin\/rooms/);
-  assert.match(frontEndSource, /\/admin\/chat\?roomId=/);
+  assert.match(frontEndSource, /buildAdminPath\('chat'/);
   assert.match(frontEndSource, /class="room-name"[\s\S]*target="_blank"[\s\S]*rel="noopener noreferrer"/);
   assert.match(frontEndSource, /\/api\/admin\/profile/);
   assert.match(frontEndSource, /\/api\/rooms\/share\//);
+  assert.match(frontEndSource, /\/api\/rooms\/public/);
+  assert.match(frontEndSource, /x-admin-entry-key/);
+  assert.match(frontEndSource, /getAdminEntryKeyFromPath/);
+  assert.match(frontEndSource, /buildAdminPath/);
   assert.match(frontEndSource, /guest-chat/);
+  assert.match(frontEndSource, /home/);
   assert.match(frontEndSource, /method:\s*'DELETE'/);
   assert.match(frontEndSource, /welcomeMessage:\s*string/);
   assert.match(frontEndSource, /roomEditDialog/);
@@ -256,6 +264,7 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(stylesCss, /@media \(max-width:\s*767px\)\s*{[\s\S]*\.composer-input-wrap textarea\s*{[\s\S]*font-size:\s*16px/s);
   assert.doesNotMatch(frontEndSource, /:disabled="!activeGuestId"/);
   assert.doesNotMatch(frontEndSource, /:disabled="!guestRoom"/);
+  assert.doesNotMatch(frontEndSource, /navigate\('\/admin\/login/);
   assert.match(frontEndSource, /登录已失效/);
 });
 

@@ -5,8 +5,8 @@ import { RoomService, type RoomRecord, type RoomRepository } from '../src/servic
 class MemoryRoomRepository implements RoomRepository {
   readonly rooms: RoomRecord[] = [];
 
-  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active'; remarkName?: string; welcomeMessage?: string }): Promise<RoomRecord> {
-    const room = { ...data, remarkName: data.remarkName ?? '', welcomeMessage: data.welcomeMessage ?? '', createdAt: new Date(), updatedAt: new Date() };
+  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active'; remarkName?: string; welcomeMessage?: string; isPublic?: boolean }): Promise<RoomRecord> {
+    const room = { ...data, remarkName: data.remarkName ?? '', welcomeMessage: data.welcomeMessage ?? '', isPublic: data.isPublic ?? false, createdAt: new Date(), updatedAt: new Date() };
     this.rooms.push(room);
     return room;
   }
@@ -23,6 +23,10 @@ class MemoryRoomRepository implements RoomRepository {
     return this.rooms.find((room) => room.shareSlug === shareSlug) ?? null;
   }
 
+  async findPublicRooms(): Promise<RoomRecord[]> {
+    return this.rooms.filter((room) => (room as RoomRecord & { isPublic: boolean }).isPublic && room.status === 'active');
+  }
+
   async updateStatus(id: string, adminId: string, status: 'active' | 'closed'): Promise<RoomRecord | null> {
     const room = this.rooms.find((item) => item.id === id && item.adminId === adminId);
 
@@ -35,7 +39,7 @@ class MemoryRoomRepository implements RoomRepository {
     return room;
   }
 
-  async updateRoom(id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string }): Promise<RoomRecord | null> {
+  async updateRoom(id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string; isPublic?: boolean }): Promise<RoomRecord | null> {
     const room = this.rooms.find((item) => item.id === id && item.adminId === adminId);
 
     if (!room) {
@@ -48,6 +52,10 @@ class MemoryRoomRepository implements RoomRepository {
 
     if (data.welcomeMessage !== undefined) {
       room.welcomeMessage = data.welcomeMessage;
+    }
+
+    if (data.isPublic !== undefined) {
+      (room as RoomRecord & { isPublic: boolean }).isPublic = data.isPublic;
     }
 
     room.updatedAt = new Date();
@@ -132,4 +140,27 @@ test('访客可以通过分享标识查询启用中的聊天室', async () => {
 
   assert.equal(roomInfo?.id, created.room.id);
   assert.equal(roomInfo?.shareSlug, created.room.shareSlug);
+});
+
+test('主页只列出管理员标记为公开且启用中的聊天室', async () => {
+  const service = new RoomService(new MemoryRoomRepository(), { protocol: 'https', host: 'example.com' });
+  const publicRoom = await (service.createRoom as unknown as (
+    adminId: string,
+    remarkName?: string,
+    welcomeMessage?: string,
+    isPublic?: boolean
+  ) => Promise<{ room: RoomRecord & { isPublic: boolean }; shareUrl: string }>).call(service, 'admin-1', '公开咨询', '', true);
+  await (service.createRoom as unknown as (
+    adminId: string,
+    remarkName?: string,
+    welcomeMessage?: string,
+    isPublic?: boolean
+  ) => Promise<{ room: RoomRecord & { isPublic: boolean }; shareUrl: string }>).call(service, 'admin-1', '内部客服', '', false);
+  const updated = await service.updateRoomSettings(publicRoom.room.id, 'admin-1', { isPublic: true } as { isPublic: boolean });
+  const publicRooms = await (service as unknown as { listPublicRooms: () => Promise<Array<RoomRecord & { isPublic: boolean; shareUrl?: string }>> }).listPublicRooms();
+
+  assert.equal((updated as unknown as { isPublic?: boolean } | null)?.isPublic, true);
+  assert.equal(publicRooms.length, 1);
+  assert.equal(publicRooms[0].id, publicRoom.room.id);
+  assert.equal(publicRooms[0].shareUrl, publicRoom.shareUrl);
 });

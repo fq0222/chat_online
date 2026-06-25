@@ -18,6 +18,7 @@ export type AppConfig = {
   auth: {
     adminTokenTtlMs: number;
     jwtSecret: string;
+    adminEntryKey?: string;
   };
 };
 
@@ -38,7 +39,8 @@ const defaultConfig: AppConfig = {
   },
   auth: {
     adminTokenTtlMs: 24 * 60 * 60 * 1000,
-    jwtSecret: 'development-only-jwt-secret-change-before-production'
+    jwtSecret: 'development-only-jwt-secret-change-before-production',
+    adminEntryKey: undefined
   }
 };
 
@@ -82,6 +84,10 @@ export function loadConfig(): AppConfig {
 function assertSafeProductionConfig(config: AppConfig): void {
   if (process.env.NODE_ENV !== 'production') {
     return;
+  }
+
+  if (!config.auth.adminEntryKey || !/^[0-9a-f]{32}$/i.test(config.auth.adminEntryKey)) {
+    throw new Error('鐢熶骇鐜蹇呴』閰嶇疆 32 浣嶅崄鍏繘鍒剁殑 auth.adminEntryKey');
   }
 
   if (config.auth.jwtSecret.length < 32 || /change|development|example/i.test(config.auth.jwtSecret)) {

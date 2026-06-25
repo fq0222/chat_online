@@ -49,13 +49,15 @@ export function useChatOnlineApp() {
   const setupForm = reactive({ username: '', password: '' });
   const settingsForm = reactive({ username: '', password: '' });
   const roomForm = reactive({ remarkName: '' });
-  const roomEditDialog = reactive({ visible: false, roomId: '', remarkName: '', welcomeMessage: '' });
+  const roomEditDialog = reactive({ visible: false, roomId: '', remarkName: '', welcomeMessage: '', isPublic: false });
   const status = reactive({ message: '', type: 'plain' as StatusType });
   const showSetup = ref(false);
   const bootstrapToken = ref('');
   const rooms = ref<RoomInfo[]>([]);
+  const publicRooms = ref<RoomInfo[]>([]);
   const guestRoom = ref<RoomInfo | null>(null);
   const loadingRooms = ref(false);
+  const loadingPublicRooms = ref(false);
   const copiedRoomId = ref('');
   const messageInput = ref('');
   const connectionStatus = ref('等待连接');
@@ -246,22 +248,63 @@ export function useChatOnlineApp() {
     };
   }
 
+  /**
+   * 从当前路径提取管理员隐藏入口 key。
+   * @param path 浏览器路径；核心分支只接受 /<32位hex>/admin 开头的管理入口。
+   * @returns 命中隐藏入口时返回 key，否则返回空字符串。
+   */
+  function getAdminEntryKeyFromPath(path = window.location.pathname): string {
+    const [, entryKey, adminSegment] = path.split('/');
+
+    if (adminSegment !== 'admin' || !/^[0-9a-f]{32}$/i.test(entryKey)) {
+      return '';
+    }
+
+    return entryKey;
+  }
+
+  /**
+   * 构造当前隐藏入口下的管理端路径。
+   * @param section 管理端子路径，例如 rooms、settings 或 chat。
+   * @param query 查询字符串；核心分支用于保留 roomId 和登录过期原因。
+   * @returns 可直接跳转的管理端路径；未处在隐藏入口时回到主页。
+   */
+  function buildAdminPath(section = '', query = ''): string {
+    const entryKey = getAdminEntryKeyFromPath();
+
+    if (!entryKey) {
+      return '/';
+    }
+
+    return `/${entryKey}/admin${section ? `/${section}` : ''}${query}`;
+  }
+
   const page = computed<PageName>(() => {
     const path = window.location.pathname;
+
+    if (path === '/') {
+      return 'home';
+    }
 
     if (path.startsWith('/chat/')) {
       return 'guest-chat';
     }
 
-    if (path.includes('/admin/settings')) {
+    const adminEntryKey = getAdminEntryKeyFromPath(path);
+
+    if (!adminEntryKey) {
+      return 'home';
+    }
+
+    if (path.endsWith('/admin/settings')) {
       return 'settings';
     }
 
-    if (path.includes('/admin/chat')) {
+    if (path.endsWith('/admin/chat')) {
       return 'chat';
     }
 
-    if (path.includes('/admin/rooms')) {
+    if (path.endsWith('/admin/rooms')) {
       return 'rooms';
     }
 
@@ -746,7 +789,7 @@ export function useChatOnlineApp() {
    * @param from 发送方连接摘要，管理端用于定位访客会话。
    * @returns true 表示同一 imageId 的占位或成图已经存在。
    */
-  function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): boolean {
+function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): boolean {
     if (page.value === 'guest-chat') {
       return hasImageMessage(chatMessages.value, imageId);
     }
@@ -1416,6 +1459,7 @@ export function useChatOnlineApp() {
     roomEditDialog.roomId = room.id;
     roomEditDialog.remarkName = room.remarkName;
     roomEditDialog.welcomeMessage = room.welcomeMessage ?? '';
+    roomEditDialog.isPublic = room.isPublic;
   }
 
   /**
@@ -1427,6 +1471,7 @@ export function useChatOnlineApp() {
     roomEditDialog.roomId = '';
     roomEditDialog.remarkName = '';
     roomEditDialog.welcomeMessage = '';
+    roomEditDialog.isPublic = false;
   }
 
   /**
@@ -1434,8 +1479,13 @@ export function useChatOnlineApp() {
    * @param field 字段名；核心分支只允许备注和欢迎语两个字段，避免模板误写其他状态。
    * @param value 输入框当前文本。
    */
-  function updateRoomEditField(field: 'remarkName' | 'welcomeMessage', value: string): void {
-    roomEditDialog[field] = value;
+  function updateRoomEditField(field: 'remarkName' | 'welcomeMessage' | 'isPublic', value: string | boolean): void {
+    if (field === 'isPublic') {
+      roomEditDialog.isPublic = Boolean(value);
+      return;
+    }
+
+    roomEditDialog[field] = String(value);
   }
 
   /**
@@ -1456,7 +1506,7 @@ export function useChatOnlineApp() {
 
     if (response.status === 401 && page.value !== 'login') {
       clearSession();
-      navigate('/admin/login?reason=expired');
+      navigate(buildAdminPath('', '?reason=expired'));
       throw new Error('登录已失效，请重新登录。');
     }
 
@@ -1477,6 +1527,7 @@ export function useChatOnlineApp() {
     try {
       const result = await requestJson<LoginResult>('/api/auth/login', {
         method: 'POST',
+        headers: { 'x-admin-entry-key': getAdminEntryKeyFromPath() },
         body: JSON.stringify(loginForm)
       });
 
@@ -1489,7 +1540,7 @@ export function useChatOnlineApp() {
 
       localStorage.setItem(storageKeys.token, result.token);
       localStorage.setItem(storageKeys.admin, JSON.stringify(result.admin));
-      navigate('/admin/rooms');
+      navigate(buildAdminPath('rooms'));
     } catch (error) {
       setStatus((error as Error).message, 'error');
     }
@@ -1522,7 +1573,7 @@ export function useChatOnlineApp() {
    */
   async function loadRooms(): Promise<void> {
     if (!getToken()) {
-      navigate('/admin/login');
+      navigate(buildAdminPath());
       return;
     }
 
@@ -1538,6 +1589,25 @@ export function useChatOnlineApp() {
       setStatus((error as Error).message, 'error');
     } finally {
       loadingRooms.value = false;
+    }
+  }
+
+  /**
+   * 加载主页公开聊天室列表。
+   * @returns 无返回值；核心分支为访客免登录读取公开房间，失败时仅展示错误状态。
+   */
+  async function loadPublicRooms(): Promise<void> {
+    loadingPublicRooms.value = true;
+
+    try {
+      const result = await requestJson<{ rooms: RoomInfo[] }>('/api/rooms/public', {
+        method: 'GET'
+      });
+      publicRooms.value = result.rooms;
+    } catch (error) {
+      setStatus((error as Error).message, 'error');
+    } finally {
+      loadingPublicRooms.value = false;
     }
   }
 
@@ -1599,7 +1669,8 @@ export function useChatOnlineApp() {
         headers: authHeaders(),
         body: JSON.stringify({
           remarkName: roomEditDialog.remarkName,
-          welcomeMessage: roomEditDialog.welcomeMessage
+          welcomeMessage: roomEditDialog.welcomeMessage,
+          isPublic: roomEditDialog.isPublic
         })
       });
       rooms.value = rooms.value.map((item) => (item.id === result.room.id ? result.room : item));
@@ -1715,7 +1786,7 @@ export function useChatOnlineApp() {
    */
   function logout(): void {
     clearSession();
-    navigate('/admin/login');
+    navigate(buildAdminPath());
   }
 
   /**
@@ -2045,6 +2116,11 @@ export function useChatOnlineApp() {
       return;
     }
 
+    if (page.value === 'home') {
+      await loadPublicRooms();
+      return;
+    }
+
     if (page.value === 'guest-chat') {
       await loadGuestRoom();
 
@@ -2057,7 +2133,7 @@ export function useChatOnlineApp() {
     }
 
     if (page.value !== 'login' && !getToken()) {
-      navigate('/admin/login');
+      navigate(buildAdminPath());
       return;
     }
 
@@ -2091,8 +2167,10 @@ export function useChatOnlineApp() {
     toast,
     showSetup,
     rooms,
+    publicRooms,
     guestRoom,
     loadingRooms,
+    loadingPublicRooms,
     copiedRoomId,
     messageInput,
     connectionStatus,
@@ -2115,6 +2193,7 @@ export function useChatOnlineApp() {
     setImageInputElement,
     getRoomUserName,
     getRoomUserAvatar,
+    buildAdminPath,
     openRoomEditor,
     closeRoomEditor,
     updateRoomEditField,

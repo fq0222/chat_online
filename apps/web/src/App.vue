@@ -2,6 +2,7 @@
 import AdminChatWindowPage from './pages/AdminChatWindowPage.vue';
 import AdminLoginPage from './pages/AdminLoginPage.vue';
 import GuestChatWindowPage from './pages/GuestChatWindowPage.vue';
+import PublicRoomsPage from './pages/PublicRoomsPage.vue';
 import RoomManagerPage from './pages/RoomManagerPage.vue';
 import { useChatOnlineApp } from './composables/useChatOnlineApp';
 
@@ -15,7 +16,9 @@ const {
   toast,
   showSetup,
   rooms,
+  publicRooms,
   loadingRooms,
+  loadingPublicRooms,
   copiedRoomId,
   messageInput,
   connectionStatus,
@@ -37,6 +40,7 @@ const {
   setImageInputElement,
   getRoomUserName,
   getRoomUserAvatar,
+  buildAdminPath,
   openRoomEditor,
   closeRoomEditor,
   updateRoomEditField,
@@ -63,8 +67,15 @@ const {
 </script>
 
 <template>
+  <PublicRoomsPage
+    v-if="page === 'home'"
+    :rooms="publicRooms"
+    :loading="loadingPublicRooms"
+    :status="status"
+  />
+
   <AdminLoginPage
-    v-if="page === 'login'"
+    v-else-if="page === 'login'"
     :login-form="loginForm"
     :setup-form="setupForm"
     :status="status"
@@ -82,6 +93,7 @@ const {
     :copied-room-id="copiedRoomId"
     :active-rooms-count="activeRoomsCount"
     :status="status"
+    :build-admin-path="buildAdminPath"
     @logout="logout"
     @create-room="createRoom"
     @open-room-editor="openRoomEditor"
@@ -94,13 +106,13 @@ const {
 
 <main v-else-if="page === 'settings'" class="admin-page" data-page="admin-settings">
     <header class="topbar">
-      <a class="brand-link" href="/admin/rooms" aria-label="聊天室管理">
+      <a class="brand-link" :href="buildAdminPath('rooms')" aria-label="聊天室管理">
         <span class="brand-mark small">CO</span>
         <strong>Chat Online</strong>
       </a>
       <nav class="top-actions" aria-label="管理端导航">
-        <a href="/admin/rooms">聊天室</a>
-        <a class="active" href="/admin/settings">设置</a>
+        <a :href="buildAdminPath('rooms')">聊天室</a>
+        <a class="active" :href="buildAdminPath('settings')">设置</a>
         <button class="ghost-button" type="button" @click="logout">退出</button>
       </nav>
     </header>

@@ -7,6 +7,7 @@ type RoomRow = {
   share_slug: string;
   remark_name: string;
   welcome_message: string;
+  is_public: boolean;
   status: 'active' | 'closed';
   created_at: Date;
   updated_at: Date;
@@ -24,12 +25,12 @@ export class PostgresRoomRepository implements RoomRepository {
    * @param data 房间 ID、管理员 ID、分享标识、备注名称和状态。
    * @returns 创建后的房间记录。
    */
-  async createRoom(data: { id: string; adminId: string; shareSlug: string; remarkName: string; welcomeMessage: string; status: 'active' }): Promise<RoomRecord> {
+  async createRoom(data: { id: string; adminId: string; shareSlug: string; remarkName: string; welcomeMessage: string; isPublic: boolean; status: 'active' }): Promise<RoomRecord> {
     const result = await this.pool.query<RoomRow>(
-      `INSERT INTO rooms (id, admin_id, share_slug, remark_name, welcome_message, status)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO rooms (id, admin_id, share_slug, remark_name, welcome_message, is_public, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [data.id, data.adminId, data.shareSlug, data.remarkName, data.welcomeMessage, data.status]
+      [data.id, data.adminId, data.shareSlug, data.remarkName, data.welcomeMessage, data.isPublic, data.status]
     );
     return this.mapRow(result.rows[0]);
   }
@@ -58,6 +59,19 @@ export class PostgresRoomRepository implements RoomRepository {
   }
 
   /**
+   * 查询主页可展示的公开聊天室。
+   * @returns 已启用且公开标记为 true 的房间；核心分支按创建时间倒序，避免关闭或内部房间出现在主页。
+   */
+  async findPublicRooms(): Promise<RoomRecord[]> {
+    const result = await this.pool.query<RoomRow>(
+      `SELECT * FROM rooms
+       WHERE is_public = true AND status = 'active'
+       ORDER BY created_at DESC`
+    );
+    return result.rows.map((row) => this.mapRow(row));
+  }
+
+  /**
    * 按访客分享标识查询房间。
    * @param shareSlug 分享链接中的唯一标识。
    * @returns 命中的房间记录；未命中时返回 null。
@@ -74,15 +88,16 @@ export class PostgresRoomRepository implements RoomRepository {
    * @param data 可更新配置；remarkName 和 welcomeMessage 都可独立保存为空字符串。
    * @returns 更新后的房间记录；房间不存在或不属于该管理员时返回 null。
    */
-  async updateRoom(id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string }): Promise<RoomRecord | null> {
+  async updateRoom(id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string; isPublic?: boolean }): Promise<RoomRecord | null> {
     const result = await this.pool.query<RoomRow>(
       `UPDATE rooms
        SET remark_name = COALESCE($3, remark_name),
            welcome_message = COALESCE($4, welcome_message),
+           is_public = COALESCE($5, is_public),
            updated_at = NOW()
        WHERE id = $1 AND admin_id = $2
        RETURNING *`,
-      [id, adminId, data.remarkName, data.welcomeMessage]
+      [id, adminId, data.remarkName, data.welcomeMessage, data.isPublic]
     );
     return result.rows[0] ? this.mapRow(result.rows[0]) : null;
   }
@@ -127,6 +142,7 @@ export class PostgresRoomRepository implements RoomRepository {
       shareSlug: row.share_slug,
       remarkName: row.remark_name,
       welcomeMessage: row.welcome_message,
+      isPublic: row.is_public,
       status: row.status,
       createdAt: row.created_at,
       updatedAt: row.updated_at

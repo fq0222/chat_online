@@ -2,7 +2,7 @@
  * 前端聊天室共享类型。
  * 职责：集中描述登录、房间、消息和图片草稿结构；关键参数来自后端接口与 WebSocket 事件；核心分支语义由页面组件和组合式逻辑按角色区分。
  */
-export type PageName = 'login' | 'rooms' | 'settings' | 'chat' | 'guest-chat';
+export type PageName = 'home' | 'login' | 'rooms' | 'settings' | 'chat' | 'guest-chat';
 export type StatusType = 'plain' | 'success' | 'error';
 export type MessageFrom = 'guest' | 'admin';
 
@@ -23,6 +23,7 @@ export type RoomInfo = {
   shareSlug: string;
   remarkName: string;
   welcomeMessage: string;
+  isPublic: boolean;
   status: 'active' | 'closed';
   createdAt: string;
   shareUrl: string;

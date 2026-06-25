@@ -11,6 +11,7 @@ export type AppDependencies = {
   adminService: AdminService;
   authService: AuthService;
   roomService?: RoomService;
+  adminEntryKey?: string;
 };
 
 /**
@@ -26,7 +27,7 @@ export function createApp(dependencies: AppDependencies): express.Express {
   app.get('/api/health', (_request, response) => {
     response.json({ ok: true });
   });
-  app.use('/api/auth', createAuthRouter(dependencies.authService));
+  app.use('/api/auth', createAuthRouter(dependencies.authService, undefined, { adminEntryKey: dependencies.adminEntryKey }));
   app.use('/api/admin', createAdminRouter(dependencies.adminService, dependencies.authService));
   if (dependencies.roomService) {
     app.use('/api/rooms', createRoomRouter(dependencies.roomService, dependencies.authService));

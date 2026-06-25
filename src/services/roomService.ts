@@ -6,6 +6,7 @@ export type RoomRecord = {
   shareSlug: string;
   remarkName: string;
   welcomeMessage: string;
+  isPublic: boolean;
   status: 'active' | 'closed';
   createdAt: Date;
   updatedAt: Date;
@@ -17,17 +18,19 @@ export type RoomInfo = {
   shareSlug: string;
   remarkName: string;
   welcomeMessage: string;
+  isPublic: boolean;
   status: 'active' | 'closed';
   createdAt: string;
   shareUrl?: string;
 };
 
 export type RoomRepository = {
-  createRoom: (data: { id: string; adminId: string; shareSlug: string; remarkName: string; welcomeMessage: string; status: 'active' }) => Promise<RoomRecord>;
+  createRoom: (data: { id: string; adminId: string; shareSlug: string; remarkName: string; welcomeMessage: string; isPublic: boolean; status: 'active' }) => Promise<RoomRecord>;
   findById: (id: string) => Promise<RoomRecord | null>;
   findByAdminId: (adminId: string) => Promise<RoomRecord[]>;
+  findPublicRooms: () => Promise<RoomRecord[]>;
   findByShareSlug: (shareSlug: string) => Promise<RoomRecord | null>;
-  updateRoom: (id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string }) => Promise<RoomRecord | null>;
+  updateRoom: (id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string; isPublic?: boolean }) => Promise<RoomRecord | null>;
   updateStatus: (id: string, adminId: string, status: 'active' | 'closed') => Promise<RoomRecord | null>;
   deleteRoom: (id: string, adminId: string) => Promise<RoomRecord | null>;
 };
@@ -53,7 +56,7 @@ export class RoomService {
    * @param remarkName 管理员填写的房间备注名称；空值会保存为空字符串。
    * @returns 房间记录和可分享给访客的链接。
    */
-  async createRoom(adminId: string, remarkName = '', welcomeMessage = ''): Promise<{ room: RoomRecord; shareUrl: string }> {
+  async createRoom(adminId: string, remarkName = '', welcomeMessage = '', isPublic = false): Promise<{ room: RoomRecord; shareUrl: string }> {
     const id = crypto.randomUUID();
     const shareSlug = crypto.randomUUID();
     const room = await this.repository.createRoom({
@@ -62,6 +65,7 @@ export class RoomService {
       shareSlug,
       remarkName: this.normalizeRemarkName(remarkName),
       welcomeMessage: this.normalizeWelcomeMessage(welcomeMessage),
+      isPublic,
       status: 'active'
     });
 
@@ -94,6 +98,16 @@ export class RoomService {
   }
 
   /**
+   * 列出允许显示在主页的聊天室。
+   * @returns 仅包含启用且管理员已公开的房间；核心分支由仓储层过滤状态和公开标记，服务层补齐访客分享链接。
+   */
+  async listPublicRooms(): Promise<RoomInfo[]> {
+    const rooms = await this.repository.findPublicRooms();
+
+    return rooms.map((room) => this.toRoomInfo(room, true));
+  }
+
+  /**
    * 关闭管理员自己的聊天室。
    * @param roomId 房间 ID。
    * @param adminId 管理员 ID。
@@ -112,10 +126,11 @@ export class RoomService {
    * @param data 可更新配置；remarkName 为空时清空备注，welcomeMessage 为空时关闭访客首次进入欢迎语。
    * @returns 更新后的房间信息；房间不存在或不属于该管理员时返回 null。
    */
-  async updateRoomSettings(roomId: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string }): Promise<RoomInfo | null> {
+  async updateRoomSettings(roomId: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string; isPublic?: boolean }): Promise<RoomInfo | null> {
     const room = await this.repository.updateRoom(roomId, adminId, {
       ...(data.remarkName !== undefined ? { remarkName: this.normalizeRemarkName(data.remarkName) } : {}),
-      ...(data.welcomeMessage !== undefined ? { welcomeMessage: this.normalizeWelcomeMessage(data.welcomeMessage) } : {})
+      ...(data.welcomeMessage !== undefined ? { welcomeMessage: this.normalizeWelcomeMessage(data.welcomeMessage) } : {}),
+      ...(data.isPublic !== undefined ? { isPublic: data.isPublic } : {})
     });
 
     return room ? this.toRoomInfo(room, true) : null;
@@ -155,6 +170,7 @@ export class RoomService {
       shareSlug: room.shareSlug,
       remarkName: room.remarkName,
       welcomeMessage: room.welcomeMessage,
+      isPublic: room.isPublic,
       status: room.status,
       createdAt: room.createdAt.toISOString(),
       ...(includeShareUrl ? { shareUrl: this.buildShareUrl(room.shareSlug) } : {})

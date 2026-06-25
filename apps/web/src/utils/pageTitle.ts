@@ -1,6 +1,7 @@
 import type { PageName } from '../types';
 
 const pageTitleMap: Record<PageName, string> = {
+  home: '公开聊天室 - Chat Online',
   login: '管理员登录 - Chat Online',
   rooms: '聊天室管理 - Chat Online',
   settings: '管理员设置 - Chat Online',

@@ -6,6 +6,7 @@ type RoomEditDialogState = {
   roomId: string;
   remarkName: string;
   welcomeMessage: string;
+  isPublic: boolean;
 };
 
 /**
@@ -20,6 +21,7 @@ defineProps<{
   copiedRoomId: string;
   activeRoomsCount: number;
   status: StatusState;
+  buildAdminPath: (section?: string, query?: string) => string;
 }>();
 
 const emit = defineEmits<{
@@ -27,7 +29,7 @@ const emit = defineEmits<{
   (event: 'create-room'): void;
   (event: 'open-room-editor', room: RoomInfo): void;
   (event: 'close-room-editor'): void;
-  (event: 'update-room-edit-field', field: 'remarkName' | 'welcomeMessage', value: string): void;
+  (event: 'update-room-edit-field', field: 'remarkName' | 'welcomeMessage' | 'isPublic', value: string | boolean): void;
   (event: 'save-room-settings'): void;
   (event: 'copy-share-url', room: RoomInfo): void;
   (event: 'delete-room', roomId: string): void;
@@ -45,18 +47,30 @@ function updateEditField(field: 'remarkName' | 'welcomeMessage', event: Event): 
     emit('update-room-edit-field', field, target.value);
   }
 }
+
+/**
+ * 转发公开展示开关状态。
+ * @param event 复选框变更事件；核心分支仅接受 HTMLInputElement，避免其他事件源误写弹窗状态。
+ */
+function updatePublicField(event: Event): void {
+  const target = event.target;
+
+  if (target instanceof HTMLInputElement) {
+    emit('update-room-edit-field', 'isPublic', target.checked);
+  }
+}
 </script>
 
 <template>
   <main class="admin-page" data-page="room-manager">
     <header class="topbar">
-      <a class="brand-link" href="/admin/rooms" aria-label="聊天室管理">
+      <a class="brand-link" :href="buildAdminPath('rooms')" aria-label="聊天室管理">
         <span class="brand-mark small">CO</span>
         <strong>Chat Online</strong>
       </a>
       <nav class="top-actions" aria-label="管理端导航">
-        <a class="active" href="/admin/rooms">聊天室</a>
-        <a href="/admin/settings">设置</a>
+        <a class="active" :href="buildAdminPath('rooms')">聊天室</a>
+        <a :href="buildAdminPath('settings')">设置</a>
         <button class="ghost-button" type="button" @click="emit('logout')">退出</button>
       </nav>
     </header>
@@ -94,12 +108,13 @@ function updateEditField(field: 'remarkName' | 'welcomeMessage', event: Event): 
             <span>状态</span>
             <span>创建时间</span>
             <span>访客链接</span>
+            <span>主页</span>
             <span>操作</span>
           </div>
           <div v-for="room in rooms" :key="room.id" class="room-row">
             <a
               class="room-name"
-              :href="`/admin/chat?roomId=${encodeURIComponent(room.id)}`"
+              :href="buildAdminPath('chat', `?roomId=${encodeURIComponent(room.id)}`)"
               target="_blank"
               rel="noopener noreferrer"
               :title="room.id"
@@ -110,6 +125,7 @@ function updateEditField(field: 'remarkName' | 'welcomeMessage', event: Event): 
             <span class="status-pill" :class="room.status">{{ room.status === 'active' ? '启用中' : '已关闭' }}</span>
             <span>{{ new Date(room.createdAt).toLocaleString('zh-CN', { hour12: false }) }}</span>
             <code>{{ room.shareUrl }}</code>
+            <span class="status-pill" :class="room.isPublic ? 'active' : 'closed'">{{ room.isPublic ? '显示' : '隐藏' }}</span>
             <span class="row-actions">
               <button class="secondary-button" type="button" @click="emit('open-room-editor', room)">编辑</button>
               <button class="secondary-button" type="button" @click="emit('copy-share-url', room)">
@@ -153,6 +169,14 @@ function updateEditField(field: 'remarkName' | 'welcomeMessage', event: Event): 
             placeholder="访客首次进入时自动收到，可留空"
             @input="updateEditField('welcomeMessage', $event)"
           ></textarea>
+        </label>
+        <label class="checkbox-field">
+          <input
+            type="checkbox"
+            :checked="roomEditDialog.isPublic"
+            @change="updatePublicField"
+          />
+          <span>显示在主页</span>
         </label>
         <div class="modal-action-row">
           <button class="secondary-button" type="button" @click="emit('close-room-editor')">取消</button>

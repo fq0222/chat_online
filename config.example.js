@@ -20,6 +20,7 @@ module.exports = {
   },
   auth: {
     adminTokenTtlMs: 24 * 60 * 60 * 1000,
-    jwtSecret: 'change-me-to-a-random-jwt-secret-at-least-32-characters'
+    jwtSecret: 'change-me-to-a-random-jwt-secret-at-least-32-characters',
+    adminEntryKey: '0123456789abcdef0123456789abcdef'
   }
 };

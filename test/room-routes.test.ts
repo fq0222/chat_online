@@ -42,8 +42,8 @@ class MemoryAdminRepository implements AdminRepository {
 class MemoryRoomRepository implements RoomRepository {
   private rooms: RoomRecord[] = [];
 
-  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active'; remarkName?: string; welcomeMessage?: string }): Promise<RoomRecord> {
-    const room = { ...data, remarkName: data.remarkName ?? '', welcomeMessage: data.welcomeMessage ?? '', createdAt: new Date(), updatedAt: new Date() };
+  async createRoom(data: { id: string; adminId: string; shareSlug: string; status: 'active'; remarkName?: string; welcomeMessage?: string; isPublic?: boolean }): Promise<RoomRecord> {
+    const room = { ...data, remarkName: data.remarkName ?? '', welcomeMessage: data.welcomeMessage ?? '', isPublic: data.isPublic ?? false, createdAt: new Date(), updatedAt: new Date() };
     this.rooms.push(room);
     return room;
   }
@@ -60,6 +60,10 @@ class MemoryRoomRepository implements RoomRepository {
     return this.rooms.find((room) => room.shareSlug === shareSlug) ?? null;
   }
 
+  async findPublicRooms(): Promise<RoomRecord[]> {
+    return this.rooms.filter((room) => (room as RoomRecord & { isPublic: boolean }).isPublic && room.status === 'active');
+  }
+
   async updateStatus(id: string, adminId: string, status: 'active' | 'closed'): Promise<RoomRecord | null> {
     const room = this.rooms.find((item) => item.id === id && item.adminId === adminId);
 
@@ -72,7 +76,7 @@ class MemoryRoomRepository implements RoomRepository {
     return room;
   }
 
-  async updateRoom(id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string }): Promise<RoomRecord | null> {
+  async updateRoom(id: string, adminId: string, data: { remarkName?: string; welcomeMessage?: string; isPublic?: boolean }): Promise<RoomRecord | null> {
     const room = this.rooms.find((item) => item.id === id && item.adminId === adminId);
 
     if (!room) {
@@ -85,6 +89,10 @@ class MemoryRoomRepository implements RoomRepository {
 
     if (data.welcomeMessage !== undefined) {
       room.welcomeMessage = data.welcomeMessage;
+    }
+
+    if (data.isPublic !== undefined) {
+      (room as RoomRecord & { isPublic: boolean }).isPublic = data.isPublic;
     }
 
     room.updatedAt = new Date();
@@ -141,6 +149,48 @@ test('未登录不能创建房间', async () => {
     const response = await fetch(`${server.baseUrl}/api/rooms`, { method: 'POST' });
 
     assert.equal(response.status, 401);
+  } finally {
+    await server.close();
+  }
+});
+
+test('公开聊天室接口只返回标记为公开的启用聊天室', async () => {
+  const server = await createTestServer();
+
+  try {
+    const token = await login(server.baseUrl);
+    const publicCreateResponse = await fetch(`${server.baseUrl}/api/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ remarkName: '公开咨询' })
+    });
+    const privateCreateResponse = await fetch(`${server.baseUrl}/api/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ remarkName: '内部客服' })
+    });
+    const publicCreateBody = await publicCreateResponse.json();
+    const privateCreateBody = await privateCreateResponse.json();
+
+    await fetch(`${server.baseUrl}/api/rooms/${publicCreateBody.room.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ remarkName: '公开咨询', welcomeMessage: '', isPublic: true })
+    });
+    await fetch(`${server.baseUrl}/api/rooms/${privateCreateBody.room.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ remarkName: '内部客服', welcomeMessage: '', isPublic: false })
+    });
+
+    const response = await fetch(`${server.baseUrl}/api/rooms/public`);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.rooms.length, 1);
+    assert.equal(body.rooms[0].id, publicCreateBody.room.id);
+    assert.equal(body.rooms[0].isPublic, true);
+    assert.equal(body.rooms[0].shareUrl, publicCreateBody.shareUrl);
   } finally {
     await server.close();
   }

@@ -27,6 +27,11 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
     response.json({ rooms });
   });
 
+  router.get('/public', async (_request, response) => {
+    const rooms = await roomService.listPublicRooms();
+    response.json({ rooms });
+  });
+
   router.get('/share/:shareSlug', async (request, response) => {
     const room = await roomService.getRoomByShareSlug(request.params.shareSlug);
 
@@ -48,7 +53,8 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
 
     const remarkName = typeof request.body?.remarkName === 'string' ? request.body.remarkName : '';
     const welcomeMessage = typeof request.body?.welcomeMessage === 'string' ? request.body.welcomeMessage : '';
-    const result = await roomService.createRoom(session.adminId, remarkName, welcomeMessage);
+    const isPublic = typeof request.body?.isPublic === 'boolean' ? request.body.isPublic : false;
+    const result = await roomService.createRoom(session.adminId, remarkName, welcomeMessage, isPublic);
     logger.info(`聊天室创建成功：${result.room.id}`);
 
     response.status(201).json({
@@ -58,6 +64,7 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
         shareSlug: result.room.shareSlug,
         remarkName: result.room.remarkName,
         welcomeMessage: result.room.welcomeMessage,
+        isPublic: result.room.isPublic,
         status: result.room.status,
         createdAt: result.room.createdAt.toISOString()
       },
@@ -86,7 +93,8 @@ export function createRoomRouter(roomService: RoomService, authService: AuthServ
 
     const remarkName = typeof request.body?.remarkName === 'string' ? request.body.remarkName : '';
     const welcomeMessage = typeof request.body?.welcomeMessage === 'string' ? request.body.welcomeMessage : '';
-    const room = await roomService.updateRoomSettings(request.params.roomId, session.adminId, { remarkName, welcomeMessage });
+    const isPublic = typeof request.body?.isPublic === 'boolean' ? request.body.isPublic : undefined;
+    const room = await roomService.updateRoomSettings(request.params.roomId, session.adminId, { remarkName, welcomeMessage, isPublic });
 
     if (!room) {
       response.status(404).json({ message: '聊天室不存在' });
