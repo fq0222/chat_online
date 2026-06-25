@@ -87,7 +87,7 @@ function assertSafeProductionConfig(config: AppConfig): void {
   }
 
   if (!config.auth.adminEntryKey || !/^[0-9a-f]{32}$/i.test(config.auth.adminEntryKey)) {
-    throw new Error('鐢熶骇鐜蹇呴』閰嶇疆 32 浣嶅崄鍏繘鍒剁殑 auth.adminEntryKey');
+    throw new Error('生产环境必须配置 32 位十六进制的 auth.adminEntryKey');
   }
 
   if (config.auth.jwtSecret.length < 32 || /change|development|example/i.test(config.auth.jwtSecret)) {
