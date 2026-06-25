@@ -121,14 +121,25 @@ textarea {
   color: var(--muted);
 }
 
-.public-room-item em {
+.public-room-enter-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  border-radius: 8px;
+  min-width: 72px;
+  min-height: 40px;
+  border-radius: 999px;
   background: var(--primary);
   color: #fff;
-  font-style: normal;
   font-weight: 900;
-  padding: 10px 16px;
+  padding: 0 20px;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.public-room-enter-button:hover,
+.public-room-enter-button:focus-visible {
+  background: var(--primary-dark);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
 }
 
 .public-room-empty {

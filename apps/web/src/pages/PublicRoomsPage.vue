@@ -24,19 +24,22 @@ defineProps<{
       </header>
 
       <div v-if="rooms.length" class="public-room-list">
-        <a
+        <article
           v-for="room in rooms"
           :key="room.id"
           class="public-room-item"
-          :href="room.shareUrl"
-          :aria-label="`进入 ${room.remarkName || '未命名聊天室'}`"
         >
           <span>
             <strong>{{ room.remarkName || '未命名聊天室' }}</strong>
-            <small>{{ room.welcomeMessage || '在线客服' }}</small>
           </span>
-          <em>进入</em>
-        </a>
+          <a
+            class="public-room-enter-button"
+            :href="room.shareUrl"
+            :aria-label="`进入 ${room.remarkName || '未命名聊天室'}`"
+          >
+            进入
+          </a>
+        </article>
       </div>
 
       <div v-else class="public-room-empty">

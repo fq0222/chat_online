@@ -60,6 +60,19 @@ test('前端页面必须从 App.vue 拆分为独立页面组件', () => {
   assert.ok(appVue.split('\n').length < 700);
 });
 
+test('公开聊天室主页只有进入按钮承载跳转热区', () => {
+  const publicRoomsPage = readWebSource('pages/PublicRoomsPage.vue');
+  const stylesCss = fs.readFileSync(path.join(root, 'apps/web/src/styles.css'), 'utf8');
+
+  assert.match(publicRoomsPage, /<article[\s\S]*class="public-room-item"/);
+  assert.doesNotMatch(publicRoomsPage, /<a(?:\s|>)[\s\S]*class="public-room-item"/);
+  assert.match(
+    publicRoomsPage,
+    /<a[\s\S]*class="public-room-enter-button"[\s\S]*:href="room\.shareUrl"[\s\S]*进入[\s\S]*<\/a>/
+  );
+  assert.match(stylesCss, /\.public-room-enter-button\s*{[^}]*min-width:\s*72px[^}]*border-radius:\s*999px/s);
+});
+
 test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   const agents = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
   const rootPackage = readJson('package.json');
