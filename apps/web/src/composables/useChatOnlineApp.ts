@@ -7,6 +7,7 @@ import { assembleImageChunks, createImageChunks, dataUrlToBlob, type ImageChunk 
 import { compressImageFileForChat, readBlobAsDataUrl } from '../utils/imageCompression';
 import { createMediaSocket } from '../utils/mediaSocket';
 import { getPageTitle } from '../utils/pageTitle';
+import { getRoomUserConversationKey, mergeRoomUsersByPresence } from '../utils/roomUserPresence';
 import { isPageActive, playIncomingMessageSound, shouldPlayIncomingMessageSound } from '../utils/messageSound';
 import { createReconnectPolicy } from '../utils/websocketReconnect';
 import type {
@@ -336,7 +337,9 @@ export function useChatOnlineApp() {
   );
   const hasMessageDraft = computed(() => Boolean(messageInput.value.trim() || pendingImages.value.length));
   const canSendMessage = computed(() =>
-    page.value === 'guest-chat' ? Boolean(guestRoom.value && hasMessageDraft.value) : Boolean(selectedGuestId.value && hasMessageDraft.value)
+    page.value === 'guest-chat'
+      ? Boolean(guestRoom.value && hasMessageDraft.value)
+      : Boolean(selectedGuestId.value && activeRoomUser.value?.online && hasMessageDraft.value)
   );
 
   /**
@@ -346,15 +349,6 @@ export function useChatOnlineApp() {
    */
   function formatMessageTime(date = new Date()): string {
     return date.toLocaleString('zh-CN', { hour12: false });
-  }
-
-  /**
-   * 获取管理端会话聚合键。
-   * @param user 房间用户摘要；核心分支为访客优先使用浏览器稳定会话 ID，管理员和旧连接回退到连接 ID。
-   * @returns 用于左侧高亮、未读数和会话消息缓存的键。
-   */
-  function getRoomUserConversationKey(user: Pick<RelayRoomUser, 'connectionId' | 'role' | 'guestSessionId'>): string {
-    return user.role === 'guest' ? user.guestSessionId ?? user.connectionId : user.connectionId;
   }
 
   /**
@@ -388,6 +382,7 @@ export function useChatOnlineApp() {
     const current = roomUsers.value.find((item) => getRoomUserConversationKey(item) === conversationKey);
     const next: RoomUser = {
       ...user,
+      online: true,
       unreadCount: current?.unreadCount ?? 0,
       firstUnreadIndex: current?.firstUnreadIndex ?? null,
       lastMessageAt: current?.lastMessageAt ?? '',
@@ -401,23 +396,12 @@ export function useChatOnlineApp() {
 
   /**
    * 用在线用户快照刷新左侧用户列表。
-   * @param users 后端 presence 事件下发的在线用户；核心分支保留未读状态并移除已离线用户。
+   * @param users 后端 presence 事件下发的在线用户；核心分支保留已离线访客，让管理员继续查看当前内存中的会话消息。
    */
   function syncRoomUsers(users: RelayRoomUser[]): void {
-    const previous = new Map(roomUsers.value.map((user) => [getRoomUserConversationKey(user), user]));
-    roomUsers.value = users.map((user) => {
-      const current = previous.get(getRoomUserConversationKey(user));
+    roomUsers.value = mergeRoomUsersByPresence(roomUsers.value, users);
 
-      return {
-        ...user,
-        unreadCount: current?.unreadCount ?? 0,
-        firstUnreadIndex: current?.firstUnreadIndex ?? null,
-        lastMessageAt: current?.lastMessageAt ?? '',
-        lastMessageAtMs: current?.lastMessageAtMs ?? 0
-      };
-    });
-
-    if (activeGuestId.value && !roomUsers.value.some((user) => getRoomUserConversationKey(user) === activeGuestId.value)) {
+    if (activeGuestId.value && !roomUsers.value.some((user) => user.role === 'guest' && getRoomUserConversationKey(user) === activeGuestId.value)) {
       activeGuestId.value = '';
     }
   }

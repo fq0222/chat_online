@@ -97,14 +97,14 @@ function getRoomUserActiveKey(user: RoomUser): string {
               v-for="user in roomUserList"
               :key="getRoomUserActiveKey(user)"
               class="room-user-card"
-              :class="{ active: getRoomUserActiveKey(user) === activeGuestId, self: user.role === 'admin' }"
+              :class="{ active: getRoomUserActiveKey(user) === activeGuestId, self: user.role === 'admin', offline: user.role === 'guest' && !user.online }"
               type="button"
               @click="emit('select-room-user', user)"
             >
               <span class="avatar" :class="{ admin: user.role === 'admin' }">{{ getRoomUserAvatar(user) }}</span>
               <span class="room-user-main">
                 <strong>{{ getRoomUserName(user) }}</strong>
-                <small>{{ user.role === 'admin' ? '管理员' : user.lastMessageAt || '等待消息' }}</small>
+                <small>{{ user.role === 'admin' ? '管理员' : user.online ? user.lastMessageAt || '等待消息' : '离线' }}</small>
               </span>
               <span v-if="user.unreadCount" class="unread-badge">{{ user.unreadCount }}</span>
             </button>
@@ -117,7 +117,7 @@ function getRoomUserActiveKey(user: RoomUser): string {
         <header class="chat-header">
           <div>
             <strong>{{ activeRoomUser ? getRoomUserName(activeRoomUser) : '在线客服工作台' }}</strong>
-            <span>{{ activeRoomUser ? '当前会话已读' : connectionStatus }}</span>
+            <span>{{ activeRoomUser ? (activeRoomUser.online ? '当前会话已读' : '用户已离线，仅可查看历史消息') : connectionStatus }}</span>
           </div>
           <div class="chat-header-actions">
             <label class="sound-reminder-toggle">

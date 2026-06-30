@@ -906,6 +906,10 @@ textarea:focus {
   cursor: default;
 }
 
+.room-user-card.offline {
+  opacity: 0.72;
+}
+
 .room-user-main {
   display: grid;
   min-width: 0;

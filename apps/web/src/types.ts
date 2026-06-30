@@ -56,6 +56,7 @@ export type RelayRoomUser = {
 };
 
 export type RoomUser = RelayRoomUser & {
+  online: boolean;
   unreadCount: number;
   firstUnreadIndex: number | null;
   lastMessageAt: string;

@@ -90,6 +90,7 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
     'utils/imageChunkTransfer.ts',
     'types.ts'
   ]);
+  const appRuntime = readWebSource('composables/useChatOnlineApp.ts');
   const stylesCss = fs.readFileSync(path.join(root, 'apps/web/src/styles.css'), 'utf8');
 
   assert.match(agents, /前端.*Vue3 \+ Vite/);
@@ -275,6 +276,10 @@ test('前端工程必须使用 Vue3 + Vite 并放在 apps/web', () => {
   assert.match(stylesCss, /@media \(max-width:\s*767px\)\s*{[\s\S]*\.guest-header\s*{[\s\S]*grid-template-areas:[\s\S]*"brand actions"[\s\S]*"warning warning"[\s\S]*min-height:\s*0/s);
   assert.match(stylesCss, /@media \(max-width:\s*767px\)\s*{[\s\S]*\.guest-header \.sound-reminder-toggle > span,\s*\.guest-header \.chat-history-toggle > span\s*{[\s\S]*display:\s*inline/s);
   assert.match(stylesCss, /@media \(max-width:\s*767px\)\s*{[\s\S]*\.composer-input-wrap textarea\s*{[\s\S]*font-size:\s*16px/s);
+  assert.match(frontEndSource, /user\.online \? user\.lastMessageAt \|\| '等待消息' : '离线'/);
+  assert.match(frontEndSource, /activeRoomUser \? \(activeRoomUser\.online \? '当前会话已读' : '用户已离线，仅可查看历史消息'\) : connectionStatus/);
+  assert.match(appRuntime, /activeRoomUser\.value\?\.online/);
+  assert.match(stylesCss, /\.room-user-card\.offline\s*{/);
   assert.doesNotMatch(frontEndSource, /:disabled="!activeGuestId"/);
   assert.doesNotMatch(frontEndSource, /:disabled="!guestRoom"/);
   assert.doesNotMatch(frontEndSource, /navigate\('\/admin\/login/);
