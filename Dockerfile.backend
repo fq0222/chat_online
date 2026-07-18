@@ -1,0 +1,39 @@
+# 后端生产镜像。
+# 职责：构建 TypeScript 服务并在容器内通过 PM2 运行；关键参数为 Node 版本、迁移 SQL 和 PM2 配置。
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY tsconfig.json ecosystem.config.js ./
+COPY src ./src
+RUN npm run build && mkdir -p dist/src/db/migrations && cp src/db/migrations/*.sql dist/src/db/migrations/
+
+FROM node:20-alpine AS runtime
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY package*.json ./
+RUN npm ci --omit=dev \
+  && npm install -g pm2 pm2-logrotate \
+  && npm cache clean --force
+
+COPY --from=build /app/dist ./dist
+COPY ecosystem.config.js ./
+
+EXPOSE 30007
+
+# 启动分支：先注册并配置 pm2-logrotate，再执行数据库迁移，最后用 pm2-runtime 托管后端进程。
+CMD sh -c "pm2 install pm2-logrotate || true \
+  && pm2 set pm2-logrotate:max_size 10M \
+  && pm2 set pm2-logrotate:retain 3 \
+  && pm2 set pm2-logrotate:compress true \
+  && pm2 set pm2-logrotate:dateFormat YYYY-MM-DD_HH-mm-ss \
+  && pm2 set pm2-logrotate:workerInterval 30 \
+  && pm2 set pm2-logrotate:rotateInterval '0 0 * * *' \
+  && pm2 set pm2-logrotate:rotateModule true \
+  && node dist/src/db/migrate.js \
+  && pm2-runtime ecosystem.config.js"

@@ -1,0 +1,59 @@
+# 前后端生产部署编排。
+# 职责：启动 PostgreSQL、PM2 后端和 OpenResty 前端；关键参数为数据库账号、后端配置挂载、服务网络和端口映射。
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chat-online-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chat_online
+      POSTGRES_USER: chat_online_user
+      POSTGRES_PASSWORD: change-me-db-password
+      TZ: Asia/Shanghai
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chat_online_user -d chat_online"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chat-online-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: chat-online-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config.js:/app/config.js:ro
+      - backend-logs:/app/logs
+    expose:
+      - "30007"
+    networks:
+      - chat-online-network
+
+  frontend:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: chat-online-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - chat-online-network
+
+networks:
+  chat-online-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  backend-logs:

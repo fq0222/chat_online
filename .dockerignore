@@ -1,0 +1,13 @@
+# Docker 构建上下文过滤。
+# 职责：避免把本地依赖、构建产物和真实敏感配置打进镜像。
+node_modules
+apps/web/node_modules
+dist
+apps/web/dist
+logs
+*.log
+.git
+.codegraph
+.env
+.env.*
+config.js
