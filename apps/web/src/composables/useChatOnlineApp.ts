@@ -8,7 +8,7 @@ import { compressImageFileForChat, readBlobAsDataUrl } from '../utils/imageCompr
 import { createMediaSocket } from '../utils/mediaSocket';
 import { getPageTitle } from '../utils/pageTitle';
 import { getRoomUserConversationKey, mergeRoomUsersByPresence } from '../utils/roomUserPresence';
-import { isPageActive, playIncomingMessageSound, shouldPlayIncomingMessageSound } from '../utils/messageSound';
+import { getIncomingMessageSoundMode, isPageActive, playIncomingMessageSound, primeIncomingMessageSound, shouldPlayIncomingMessageSound } from '../utils/messageSound';
 import { createReconnectPolicy } from '../utils/websocketReconnect';
 import type {
   AdminInfo,
@@ -72,6 +72,7 @@ export function useChatOnlineApp() {
   const reconnectTimerRef = ref<ReturnType<typeof setTimeout> | null>(null);
   const mediaReconnectTimerRef = ref<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = ref<number | null>(null);
+  const soundPrimeEvents = ['pointerdown', 'keydown', 'touchstart'] as const;
   const reconnectGeneration = ref(0);
   const shouldReconnectSocket = ref(true);
   const messageTimelineRef = ref<HTMLElement | null>(null);
@@ -518,6 +519,10 @@ export function useChatOnlineApp() {
   function toggleSoundReminder(): void {
     soundReminderEnabled.value = !soundReminderEnabled.value;
     localStorage.setItem(storageKeys.soundReminder, soundReminderEnabled.value ? 'on' : 'off');
+
+    if (soundReminderEnabled.value) {
+      primeIncomingMessageSound();
+    }
   }
 
   /**
@@ -635,12 +640,22 @@ export function useChatOnlineApp() {
     if (!shouldPlayIncomingMessageSound({
       soundReminderEnabled: soundReminderEnabled.value,
       pageIsActive: isPageActive(),
-      activeConversation
+      activeConversation,
+      currentPage: page.value
     })) {
       return;
     }
 
-    playIncomingMessageSound();
+    playIncomingMessageSound(getIncomingMessageSoundMode(page.value));
+  }
+
+  /**
+   * 在用户首次操作页面时预热消息提示音。
+   * 核心分支：任意一次点击、触摸或按键都会解锁后续后台播报，并移除预热监听避免重复处理。
+   */
+  function handleSoundPrimeEvent(): void {
+    primeIncomingMessageSound();
+    soundPrimeEvents.forEach((eventName) => window.removeEventListener(eventName, handleSoundPrimeEvent));
   }
 
   /**
@@ -2093,6 +2108,7 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
 
   onMounted(async () => {
     window.addEventListener('keydown', handleImagePreviewKeydown);
+    soundPrimeEvents.forEach((eventName) => window.addEventListener(eventName, handleSoundPrimeEvent, { passive: true }));
     syncPageTitle();
 
     if (page.value === 'login' && new URLSearchParams(window.location.search).get('reason') === 'expired') {
@@ -2137,6 +2153,7 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
 
   onUnmounted(() => {
     window.removeEventListener('keydown', handleImagePreviewKeydown);
+    soundPrimeEvents.forEach((eventName) => window.removeEventListener(eventName, handleSoundPrimeEvent));
     clearToastTimer();
     stopSocketReconnect();
   });
