@@ -3,6 +3,7 @@ import type { ComponentPublicInstance } from 'vue';
 import { createDraftSendQueue } from '../utils/chatDraftOrder';
 import { createChatHistoryStorage } from '../utils/chatHistoryStorage';
 import {
+  createGuestMessageNotificationInit,
   createGuestMessageNotificationTitle,
   shouldShowDesktopNotification,
   type DesktopNotificationPermission
@@ -720,10 +721,7 @@ export function useChatOnlineApp() {
   function showGuestMessageDesktopNotification(guest: RelayRoomUser): void {
     try {
       const title = createGuestMessageNotificationTitle(guest.username);
-      const notification = new Notification(title, {
-        icon: '/favicon.svg',
-        tag: getRoomUserConversationKey(guest)
-      });
+      const notification = new Notification(title, createGuestMessageNotificationInit());
 
       notification.onclick = () => {
         window.focus();

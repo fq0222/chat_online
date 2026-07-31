@@ -18,6 +18,16 @@ export function createGuestMessageNotificationTitle(username: string): string {
 }
 
 /**
+ * 生成访客新消息桌面通知配置。
+ * @returns Notification 构造参数；核心分支刻意不设置 tag，避免 Chrome 合并同一访客的连续通知。
+ */
+export function createGuestMessageNotificationInit(): NotificationOptions {
+  return {
+    icon: '/favicon.svg'
+  };
+}
+
+/**
  * 判断是否需要弹出桌面通知。
  * @param options 通知开关、浏览器授权、页面焦点和会话匹配状态；核心分支为仅管理员聊天页在后台或非当前会话时提醒。
  * @returns 满足后台提醒条件时返回 true。

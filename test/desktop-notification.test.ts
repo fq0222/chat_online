@@ -1,9 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGuestMessageNotificationTitle, shouldShowDesktopNotification } from '../apps/web/src/utils/desktopNotification';
+import {
+  createGuestMessageNotificationInit,
+  createGuestMessageNotificationTitle,
+  shouldShowDesktopNotification
+} from '../apps/web/src/utils/desktopNotification';
 
 test('桌面通知标题只显示访客名称且不暴露消息正文', () => {
   assert.equal(createGuestMessageNotificationTitle('fuqiang_2015@163.com'), '用户 fuqiang_2015@163.com 有新消息');
+});
+
+test('桌面通知不使用 tag 合并，确保同一访客后续消息也会弹出', () => {
+  const options = createGuestMessageNotificationInit();
+
+  assert.equal(Object.hasOwn(options, 'tag'), false);
 });
 
 test('管理员后台或非当前会话收到消息时才弹桌面通知', () => {
