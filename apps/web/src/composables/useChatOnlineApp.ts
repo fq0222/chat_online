@@ -2,6 +2,11 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import { createDraftSendQueue } from '../utils/chatDraftOrder';
 import { createChatHistoryStorage } from '../utils/chatHistoryStorage';
+import {
+  createGuestMessageNotificationTitle,
+  shouldShowDesktopNotification,
+  type DesktopNotificationPermission
+} from '../utils/desktopNotification';
 import { createFrontendLogger } from '../utils/frontendLogger';
 import { assembleImageChunks, createImageChunks, dataUrlToBlob, type ImageChunk } from '../utils/imageChunkTransfer';
 import { compressImageFileForChat, readBlobAsDataUrl } from '../utils/imageCompression';
@@ -36,6 +41,7 @@ export function useChatOnlineApp() {
     token: 'chatOnline.adminToken',
     admin: 'chatOnline.admin',
     soundReminder: 'chatOnline.soundReminderEnabled',
+    desktopNotification: 'chatOnline.desktopNotificationEnabled',
     guestChatHistoryEnabled: 'chatOnline.guestChatHistoryEnabled',
     guestChatHistoryPrefix: 'chatOnline.guestChatHistory',
     guestIdentityPrefix: 'chatOnline.guestIdentity'
@@ -64,6 +70,10 @@ export function useChatOnlineApp() {
   const messageInput = ref('');
   const connectionStatus = ref('等待连接');
   const soundReminderEnabled = ref(localStorage.getItem(storageKeys.soundReminder) !== 'off');
+  const desktopNotificationPermission = ref<DesktopNotificationPermission>(getDesktopNotificationPermission());
+  const desktopNotificationEnabled = ref(
+    localStorage.getItem(storageKeys.desktopNotification) === 'on' && desktopNotificationPermission.value === 'granted'
+  );
   const chatHistoryEnabled = ref(localStorage.getItem(storageKeys.guestChatHistoryEnabled) === 'on');
   const activeGuestId = ref('');
   const socketRef = ref<WebSocket | null>(null);
@@ -527,6 +537,46 @@ export function useChatOnlineApp() {
   }
 
   /**
+   * 读取当前浏览器桌面通知权限。
+   * @returns granted、denied、default 或 unsupported；核心分支为浏览器不支持 Notification 时返回 unsupported。
+   */
+  function getDesktopNotificationPermission(): DesktopNotificationPermission {
+    return 'Notification' in window ? Notification.permission : 'unsupported';
+  }
+
+  /**
+   * 切换管理员桌面通知提醒。
+   * 核心分支：开启时必须由用户点击触发授权，拒绝或不支持时关闭开关并给出状态提示。
+   */
+  async function toggleDesktopNotification(): Promise<void> {
+    if (desktopNotificationEnabled.value) {
+      desktopNotificationEnabled.value = false;
+      localStorage.setItem(storageKeys.desktopNotification, 'off');
+      return;
+    }
+
+    if (!('Notification' in window)) {
+      desktopNotificationPermission.value = 'unsupported';
+      setStatus('当前浏览器不支持桌面通知。', 'error');
+      return;
+    }
+
+    desktopNotificationPermission.value =
+      Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
+
+    if (desktopNotificationPermission.value !== 'granted') {
+      desktopNotificationEnabled.value = false;
+      localStorage.setItem(storageKeys.desktopNotification, 'off');
+      setStatus('桌面通知未授权，请在 Chrome 地址栏左侧站点设置中允许通知。', 'error');
+      return;
+    }
+
+    desktopNotificationEnabled.value = true;
+    localStorage.setItem(storageKeys.desktopNotification, 'on');
+    setStatus('桌面通知已开启。', 'success');
+  }
+
+  /**
    * 生成访客聊天记录缓存键。
    * @param roomId 房间 ID；核心分支为不同聊天室隔离记录，避免分享链接之间串消息。
    * @returns 当前访客聊天室对应的 localStorage 键。
@@ -638,10 +688,22 @@ export function useChatOnlineApp() {
    * 根据页面聚焦和会话匹配状态播放新消息提示音。
    * @param activeConversation 新消息是否属于当前正在查看的会话；核心分支用于管理员区分左侧选中的访客。
    */
-  function notifyIncomingMessage(activeConversation: boolean): void {
+  function notifyIncomingMessage(activeConversation: boolean, guest?: RelayRoomUser): void {
+    const pageActive = isPageActive();
+
+    if (shouldShowDesktopNotification({
+      enabled: desktopNotificationEnabled.value,
+      permission: desktopNotificationPermission.value,
+      pageIsActive: pageActive,
+      activeConversation,
+      currentPage: page.value
+    }) && guest) {
+      showGuestMessageDesktopNotification(guest);
+    }
+
     if (!shouldPlayIncomingMessageSound({
       soundReminderEnabled: soundReminderEnabled.value,
-      pageIsActive: isPageActive(),
+      pageIsActive: pageActive,
       activeConversation,
       currentPage: page.value
     })) {
@@ -649,6 +711,27 @@ export function useChatOnlineApp() {
     }
 
     playIncomingMessageSound(getIncomingMessageSoundMode(page.value));
+  }
+
+  /**
+   * 弹出访客新消息桌面通知。
+   * @param guest 访客连接摘要；核心分支为通知标题只包含访客名，不包含消息正文。
+   */
+  function showGuestMessageDesktopNotification(guest: RelayRoomUser): void {
+    try {
+      const title = createGuestMessageNotificationTitle(guest.username);
+      const notification = new Notification(title, {
+        icon: '/favicon.svg',
+        tag: getRoomUserConversationKey(guest)
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+    } catch {
+      // 系统或浏览器可能临时拦截通知；失败时保留声音和未读数提醒。
+    }
   }
 
   /**
@@ -1937,7 +2020,7 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
           `客服端收到访客图片：${data.payload?.mimeType ?? '未知类型'} ${formatByteSize(getUtf8ByteLength(data.payload?.dataUrl ?? ''))}`
         );
       }
-      notifyIncomingMessage(activeGuestId.value === getRoomUserConversationKey(data.from));
+      notifyIncomingMessage(activeGuestId.value === getRoomUserConversationKey(data.from), data.from);
       if (data.type === 'image:start' && data.payload?.imageId && data.payload.mimeType && data.payload.totalChunks) {
         if (!registerIncomingImageTransfer(data.payload.imageId, data.payload.mimeType, data.payload.totalChunks, data.from)) {
           return;
@@ -2178,6 +2261,8 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
     messageInput,
     connectionStatus,
     soundReminderEnabled,
+    desktopNotificationEnabled,
+    desktopNotificationPermission,
     chatHistoryEnabled,
     activeGuestId,
     pendingImages,
@@ -2201,6 +2286,7 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
     closeRoomEditor,
     updateRoomEditField,
     toggleSoundReminder,
+    toggleDesktopNotification,
     toggleChatHistoryStorage,
     selectRoomUser,
     submitLogin,

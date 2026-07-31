@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ComponentPublicInstance } from 'vue';
 import type { ChatMessage, PendingImage, RoomInfo, RoomUser, StatusType } from '../types';
+import type { DesktopNotificationPermission } from '../utils/desktopNotification';
 
 /**
  * 管理端聊天窗口页。
@@ -13,6 +14,8 @@ defineProps<{
   connectionStatus: string;
   status: { message: string; type: StatusType };
   soundReminderEnabled: boolean;
+  desktopNotificationEnabled: boolean;
+  desktopNotificationPermission: DesktopNotificationPermission;
   roomUserList: RoomUser[];
   activeGuestId: string;
   activeRoomUser: RoomUser | null;
@@ -29,6 +32,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (event: 'toggle-sound-reminder'): void;
+  (event: 'toggle-desktop-notification'): void;
   (event: 'copy-share-url', room: RoomInfo): void;
   (event: 'select-room-user', user: RoomUser): void;
   (event: 'open-image-preview', message: ChatMessage): void;
@@ -123,6 +127,15 @@ function getRoomUserActiveKey(user: RoomUser): string {
             <label class="sound-reminder-toggle">
               <input type="checkbox" :checked="soundReminderEnabled" @change="emit('toggle-sound-reminder')" />
               <span>声音提醒</span>
+            </label>
+            <label class="sound-reminder-toggle">
+              <input
+                type="checkbox"
+                :checked="desktopNotificationEnabled"
+                :disabled="desktopNotificationPermission === 'unsupported'"
+                @change="emit('toggle-desktop-notification')"
+              />
+              <span>桌面通知</span>
             </label>
             <a class="ghost-button" href="/admin/settings">设置</a>
           </div>

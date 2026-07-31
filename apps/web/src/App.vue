@@ -23,6 +23,8 @@ const {
   messageInput,
   connectionStatus,
   soundReminderEnabled,
+  desktopNotificationEnabled,
+  desktopNotificationPermission,
   chatHistoryEnabled,
   activeGuestId,
   pendingImages,
@@ -45,6 +47,7 @@ const {
   closeRoomEditor,
   updateRoomEditField,
   toggleSoundReminder,
+  toggleDesktopNotification,
   toggleChatHistoryStorage,
   selectRoomUser,
   submitLogin,
@@ -146,6 +149,8 @@ const {
     :connection-status="connectionStatus"
     :status="status"
     :sound-reminder-enabled="soundReminderEnabled"
+    :desktop-notification-enabled="desktopNotificationEnabled"
+    :desktop-notification-permission="desktopNotificationPermission"
     :room-user-list="roomUserList"
     :active-guest-id="activeGuestId"
     :active-room-user="activeRoomUser"
@@ -158,6 +163,7 @@ const {
     :get-room-user-avatar="getRoomUserAvatar"
     :get-room-user-name="getRoomUserName"
     @toggle-sound-reminder="toggleSoundReminder"
+    @toggle-desktop-notification="toggleDesktopNotification"
     @copy-share-url="copyShareUrl"
     @select-room-user="selectRoomUser"
     @open-image-preview="openImagePreview"
