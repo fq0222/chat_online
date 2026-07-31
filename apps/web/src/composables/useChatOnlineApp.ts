@@ -5,6 +5,7 @@ import { createChatHistoryStorage } from '../utils/chatHistoryStorage';
 import { createFrontendLogger } from '../utils/frontendLogger';
 import { assembleImageChunks, createImageChunks, dataUrlToBlob, type ImageChunk } from '../utils/imageChunkTransfer';
 import { compressImageFileForChat, readBlobAsDataUrl } from '../utils/imageCompression';
+import { getGuestNameFromSearch } from '../utils/guestIdentity';
 import { createMediaSocket } from '../utils/mediaSocket';
 import { getPageTitle } from '../utils/pageTitle';
 import { getRoomUserConversationKey, mergeRoomUsersByPresence } from '../utils/roomUserPresence';
@@ -561,12 +562,13 @@ export function useChatOnlineApp() {
   function getGuestIdentity(roomId: string): { guestSessionId: string; username: string } {
     const key = getGuestIdentityKey(roomId);
     const raw = localStorage.getItem(key);
+    const queryUsername = getGuestNameFromSearch(window.location.search);
 
     if (raw) {
       const identity = JSON.parse(raw) as { guestSessionId?: string; username?: string };
 
       if (identity.guestSessionId && identity.username) {
-        return { guestSessionId: identity.guestSessionId, username: identity.username };
+        return { guestSessionId: identity.guestSessionId, username: queryUsername ?? identity.username };
       }
     }
 
@@ -576,7 +578,7 @@ export function useChatOnlineApp() {
     };
     localStorage.setItem(key, JSON.stringify(identity));
 
-    return identity;
+    return { ...identity, username: queryUsername ?? identity.username };
   }
 
   /**
