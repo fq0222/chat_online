@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ComponentPublicInstance } from 'vue';
-import type { ChatMessage, PendingImage, RoomInfo, RoomUser, StatusType } from '../types';
+import type { ChatMessage, PendingImage, RoomInfo, RoomUser } from '../types';
 import type { DesktopNotificationPermission } from '../utils/desktopNotification';
 
 /**
@@ -12,7 +12,6 @@ defineProps<{
   activeRoom: RoomInfo | null;
   copiedRoomId: string;
   connectionStatus: string;
-  status: { message: string; type: StatusType };
   soundReminderEnabled: boolean;
   desktopNotificationEnabled: boolean;
   desktopNotificationPermission: DesktopNotificationPermission;
@@ -171,7 +170,6 @@ function getRoomUserActiveKey(user: RoomUser): string {
           <div v-if="!activeGuestId" class="empty-chat-state">请选择左侧访客查看聊天内容。</div>
         </div>
         <footer class="composer">
-          <p v-if="status.message" class="status-text chat-status" :class="status.type" role="status">{{ status.message }}</p>
           <form class="message-form" @submit.prevent="emit('send-message')">
             <div class="composer-input-wrap">
               <div v-if="pendingImages.length" class="image-preview-list">

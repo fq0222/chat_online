@@ -1261,10 +1261,17 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
 
   /**
    * 更新页面状态提示。
-   * @param message 要展示的文案。
-   * @param type 提示类型；核心分支通过 type 控制成功、失败和普通样式。
+   * @param message 要展示的文案；核心分支为管理端聊天页使用 toast，避免状态条挤压输入框。
+   * @param type 提示类型；通过 type 控制成功、失败和普通样式。
    */
   function setStatus(message: string, type: StatusType = 'plain'): void {
+    if (page.value === 'chat') {
+      status.message = '';
+      status.type = type;
+      showToast(message, type);
+      return;
+    }
+
     status.message = message;
     status.type = type;
   }

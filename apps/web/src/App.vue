@@ -147,7 +147,6 @@ const {
     :active-room="activeRoom"
     :copied-room-id="copiedRoomId"
     :connection-status="connectionStatus"
-    :status="status"
     :sound-reminder-enabled="soundReminderEnabled"
     :desktop-notification-enabled="desktopNotificationEnabled"
     :desktop-notification-permission="desktopNotificationPermission"

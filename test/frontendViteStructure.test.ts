@@ -60,6 +60,14 @@ test('前端页面必须从 App.vue 拆分为独立页面组件', () => {
   assert.ok(appVue.split('\n').length < 700);
 });
 
+test('管理端聊天页临时消息必须使用全局 toast 避免挤压输入框', () => {
+  const adminChatPage = readWebSource('pages/AdminChatWindowPage.vue');
+  const appVue = readWebSource('App.vue');
+
+  assert.doesNotMatch(adminChatPage, /class="status-text chat-status"/);
+  assert.match(appVue, /class="toast-message"/);
+});
+
 test('公开聊天室主页只有进入按钮承载跳转热区', () => {
   const publicRoomsPage = readWebSource('pages/PublicRoomsPage.vue');
   const stylesCss = fs.readFileSync(path.join(root, 'apps/web/src/styles.css'), 'utf8');
