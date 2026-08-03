@@ -13,6 +13,7 @@ import { assembleImageChunks, createImageChunks, dataUrlToBlob, type ImageChunk 
 import { compressImageFileForChat, readBlobAsDataUrl } from '../utils/imageCompression';
 import { getGuestNameFromSearch } from '../utils/guestIdentity';
 import { createMediaSocket } from '../utils/mediaSocket';
+import { createMediaReconnectRecovery } from '../utils/mediaReconnectRecovery';
 import { getPageTitle } from '../utils/pageTitle';
 import { getRoomUserConversationKey, mergeRoomUsersByPresence } from '../utils/roomUserPresence';
 import { getIncomingMessageSoundMode, isPageActive, playIncomingMessageSound, primeIncomingMessageSound, shouldPlayIncomingMessageSound } from '../utils/messageSound';
@@ -53,6 +54,7 @@ export function useChatOnlineApp() {
   const imageChunkSize = 1024 * 32;
   const maxPendingImages = 3;
   const socketHeartbeatMs = 25 * 1000;
+  const maxMediaReconnectsBeforeControlReconnect = 3;
 
   const loginForm = reactive({ username: '', password: '' });
   const setupForm = reactive({ username: '', password: '' });
@@ -81,6 +83,7 @@ export function useChatOnlineApp() {
   const mediaSocketRef = ref<ReturnType<typeof createMediaSocket> | null>(null);
   const controlConnectionId = ref('');
   const reconnectPolicy = createReconnectPolicy({ maxAttempts: Number.POSITIVE_INFINITY, delayMs: 5000 });
+  const mediaReconnectRecovery = createMediaReconnectRecovery({ maxMediaReconnectsBeforeControlReconnect });
   const reconnectTimerRef = ref<ReturnType<typeof setTimeout> | null>(null);
   const mediaReconnectTimerRef = ref<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = ref<number | null>(null);
@@ -1322,6 +1325,28 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
   }
 
   /**
+   * 因媒体通道连续失败而重建控制通道。
+   * @param roomId 房间 ID。
+   * @param role 当前连接角色；核心分支为管理员重连管理端控制通道，访客重连访客控制通道。
+   */
+  function reconnectControlSocketForMedia(roomId: string, role: MessageFrom): void {
+    clearMediaReconnectTimer();
+    connectionStatus.value = '图片通道多次重连失败，正在重建实时连接';
+    markPendingImageStartsUnconfirmed();
+    mediaSocketRef.value = null;
+
+    const previousSocket = socketRef.value;
+
+    if (role === 'admin') {
+      connectChatSocket(roomId);
+    } else {
+      connectGuestChatSocket(roomId);
+    }
+
+    previousSocket?.close();
+  }
+
+  /**
    * 安排媒体通道重连。
    * @param roomId 房间 ID。
    * @param role 当前连接角色。
@@ -1329,6 +1354,13 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
    */
   function scheduleMediaSocketReconnect(roomId: string, role: MessageFrom, connectionId: string): void {
     if (!shouldReconnectSocket.value || controlConnectionId.value !== connectionId || socketRef.value?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const recovery = mediaReconnectRecovery.markMediaClosed();
+
+    if (recovery.shouldReconnectControlSocket) {
+      reconnectControlSocketForMedia(roomId, role);
       return;
     }
 
@@ -1354,6 +1386,7 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
     mediaSocketRef.value?.close();
     mediaSocketRef.value = createMediaSocket(buildMediaSocketUrl(roomId, role, connectionId), {
       onOpen: () => {
+        mediaReconnectRecovery.markMediaOpened();
         flushAllPendingImageChunks();
       },
       onClose: () => {
@@ -2057,6 +2090,10 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
     });
     socket.addEventListener('close', () => {
       stopHeartbeat?.();
+      if (generation !== reconnectGeneration.value) {
+        return;
+      }
+
       markPendingImageStartsUnconfirmed();
       mediaSocketRef.value?.close();
       mediaSocketRef.value = null;
@@ -2184,6 +2221,10 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
     });
     socket.addEventListener('close', () => {
       stopHeartbeat?.();
+      if (generation !== reconnectGeneration.value) {
+        return;
+      }
+
       markPendingImageStartsUnconfirmed();
       mediaSocketRef.value?.close();
       mediaSocketRef.value = null;
