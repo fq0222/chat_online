@@ -158,7 +158,7 @@ export function attachMediaServer(
 
     socket.on('close', (code, reason) => {
       heartbeat.stop();
-      dependencies.chatMediaRelayService.disconnectMedia(connection.connectionId);
+      dependencies.chatMediaRelayService.disconnectMedia(connection.connectionId, sender);
       logger.info(
         `媒体连接已断开：${connection.roomId} ${connection.role} code=${code} reason=${formatCloseReason(reason)} bufferedAmount=${socket.bufferedAmount}`
       );

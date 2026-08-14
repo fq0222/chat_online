@@ -145,8 +145,15 @@ export class ChatMediaRelayService {
   /**
    * 移除媒体连接。
    * @param connectionId 媒体连接 ID；核心分支只移除连接，保留短暂传输会话等待同一控制连接重建媒体通道。
+   * @param sender 触发关闭的发送器；传入时只删除同一个 socket，避免旧 close 事件误删新重连。
    */
-  disconnectMedia(connectionId: string): void {
+  disconnectMedia(connectionId: string, sender?: MediaSender): void {
+    const connection = this.connections.get(connectionId);
+
+    if (sender && connection?.sender !== sender) {
+      return;
+    }
+
     this.connections.delete(connectionId);
   }
 

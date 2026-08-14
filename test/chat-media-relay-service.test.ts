@@ -111,6 +111,46 @@ test('接收方媒体连接稍后建立时会收到已经到达的图片分片',
   ]);
 });
 
+test('旧媒体连接关闭晚于新连接建立时不能删除新连接', () => {
+  const media = new ChatMediaRelayService({ now: () => 1000 });
+  const adminSender = new MemorySender();
+  const oldGuestSender = new MemorySender();
+  const newGuestSender = new MemorySender();
+
+  const admin = media.connectMedia({ connectionId: 'admin-1', roomId: 'room-1', role: 'admin' }, adminSender);
+  const oldGuest = media.connectMedia({ connectionId: 'guest-1', roomId: 'room-1', role: 'guest' }, oldGuestSender);
+  const newGuest = media.connectMedia({ connectionId: 'guest-1', roomId: 'room-1', role: 'guest' }, newGuestSender);
+
+  media.disconnectMedia(oldGuest.connectionId, oldGuestSender);
+  media.startTransfer({
+    imageId: 'image-reconnect-race',
+    roomId: 'room-1',
+    fromConnectionId: admin.connectionId,
+    toConnectionId: newGuest.connectionId,
+    totalChunks: 1,
+    chunkSize: 4,
+    size: 4
+  });
+  media.handleChunk(admin.connectionId, {
+    type: 'image:chunk',
+    imageId: 'image-reconnect-race',
+    chunkIndex: 0,
+    totalChunks: 1,
+    data: chunk('abcd')
+  });
+
+  assert.equal(oldGuestSender.messages.length, 0);
+  assert.deepEqual(newGuestSender.messages, [
+    {
+      type: 'image:chunk',
+      imageId: 'image-reconnect-race',
+      chunkIndex: 0,
+      totalChunks: 1,
+      data: chunk('abcd')
+    }
+  ]);
+});
+
 test('媒体服务拒绝越界分片且不影响其他传输', () => {
   const media = new ChatMediaRelayService({ now: () => 1000 });
   const adminSender = new MemorySender();
