@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('聊天转发');
+const welcomeMessageSuppressMs = 60 * 60 * 1000;
 
 export type MessageType = 'text' | 'image' | 'image:start';
 
@@ -92,6 +93,7 @@ export class ChatRelayService {
   private readonly maxImageBytes: number;
   private readonly maxPreviewBytes: number;
   private readonly onImageStart?: ChatRelayOptions['onImageStart'];
+  private readonly lastWelcomeMessageAt = new Map<string, number>();
 
   constructor(options: ChatRelayOptions = {}) {
     this.now = options.now ?? (() => new Date());
@@ -181,6 +183,11 @@ export class ChatRelayService {
       return;
     }
 
+    if (!this.shouldSendWelcomeMessage(roomId, guest)) {
+      logger.info(`访客 1 小时内重复进入，跳过房间欢迎语：${roomId} ${guest.guestSessionId ?? guest.connectionId}`);
+      return;
+    }
+
     const from: RelayConnection = {
       connectionId: `room-welcome:${roomId}`,
       roomId,
@@ -200,6 +207,26 @@ export class ChatRelayService {
         payload: { text }
       })
     );
+  }
+
+  /**
+   * 判断访客是否需要收到房间欢迎语，并记录本次发送时间。
+   * @param roomId 房间 ID；核心分支按房间隔离同一浏览器访客，避免跨房间互相影响。
+   * @param guest 访客连接；关键参数为 guestSessionId，没有稳定身份时退回当前连接 ID。
+   * @returns true 表示本次应发送欢迎语，false 表示仍在 1 小时抑制窗口内。
+   */
+  private shouldSendWelcomeMessage(roomId: string, guest: InternalConnection): boolean {
+    const now = this.now().getTime();
+    const guestKey = guest.guestSessionId ?? guest.connectionId;
+    const key = `${roomId}:${guestKey}`;
+    const lastSentAt = this.lastWelcomeMessageAt.get(key);
+
+    if (lastSentAt !== undefined && now - lastSentAt < welcomeMessageSuppressMs) {
+      return false;
+    }
+
+    this.lastWelcomeMessageAt.set(key, now);
+    return true;
   }
 
   /**

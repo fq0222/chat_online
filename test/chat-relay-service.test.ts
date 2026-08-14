@@ -72,6 +72,40 @@ test('房间欢迎语只自动发送给新进入的访客', () => {
   assert.equal(adminMessages.length, 0);
 });
 
+test('同一访客 1 小时内重复进入不重复收到房间欢迎语', () => {
+  let now = new Date('2026-06-10T12:00:00.000Z');
+  const relay = new ChatRelayService({ now: () => now });
+  const firstSender = new MemorySender();
+  const secondSender = new MemorySender();
+  const thirdSender = new MemorySender();
+
+  const firstGuest = relay.connectGuest('room-1', firstSender, {
+    guestSessionId: 'guest-session-stable-1',
+    username: '固定访客'
+  });
+  relay.sendWelcomeMessageToGuest('room-1', firstGuest.connectionId, '欢迎咨询');
+  relay.disconnect(firstGuest.connectionId);
+
+  now = new Date('2026-06-10T12:30:00.000Z');
+  const secondGuest = relay.connectGuest('room-1', secondSender, {
+    guestSessionId: 'guest-session-stable-1',
+    username: '固定访客'
+  });
+  relay.sendWelcomeMessageToGuest('room-1', secondGuest.connectionId, '欢迎咨询');
+  relay.disconnect(secondGuest.connectionId);
+
+  now = new Date('2026-06-10T13:00:01.000Z');
+  const thirdGuest = relay.connectGuest('room-1', thirdSender, {
+    guestSessionId: 'guest-session-stable-1',
+    username: '固定访客'
+  });
+  relay.sendWelcomeMessageToGuest('room-1', thirdGuest.connectionId, '欢迎咨询');
+
+  assert.equal(findEvents(firstSender, 'message:new').length, 1);
+  assert.equal(findEvents(secondSender, 'message:new').length, 0);
+  assert.equal(findEvents(thirdSender, 'message:new').length, 1);
+});
+
 test('空房间欢迎语不会自动发送', () => {
   const relay = new ChatRelayService();
   const guestSender = new MemorySender();
