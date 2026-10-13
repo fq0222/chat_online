@@ -967,6 +967,11 @@ textarea:focus {
   font-size: 12px;
 }
 
+.media-connection-status {
+  color: #b45309 !important;
+  font-weight: 800;
+}
+
 .room-title-remark {
   overflow: hidden;
   text-overflow: ellipsis;

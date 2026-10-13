@@ -12,6 +12,7 @@ defineProps<{
   activeRoom: RoomInfo | null;
   copiedRoomId: string;
   connectionStatus: string;
+  mediaConnectionStatus: string;
   soundReminderEnabled: boolean;
   desktopNotificationEnabled: boolean;
   desktopNotificationPermission: DesktopNotificationPermission;
@@ -76,6 +77,7 @@ function getRoomUserActiveKey(user: RoomUser): string {
           <div>
             <strong class="room-title-remark">房间 {{ activeRoom?.remarkName || (activeRoomId ? activeRoomId.slice(0, 8) : '未选择') }}</strong>
             <span>{{ connectionStatus }}</span>
+            <span v-if="mediaConnectionStatus" class="media-connection-status" role="status">{{ mediaConnectionStatus }}</span>
           </div>
         </div>
         <div class="side-room-card">

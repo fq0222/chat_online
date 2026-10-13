@@ -22,6 +22,7 @@ const {
   copiedRoomId,
   messageInput,
   connectionStatus,
+  mediaConnectionStatus,
   soundReminderEnabled,
   desktopNotificationEnabled,
   desktopNotificationPermission,
@@ -147,6 +148,7 @@ const {
     :active-room="activeRoom"
     :copied-room-id="copiedRoomId"
     :connection-status="connectionStatus"
+    :media-connection-status="mediaConnectionStatus"
     :sound-reminder-enabled="soundReminderEnabled"
     :desktop-notification-enabled="desktopNotificationEnabled"
     :desktop-notification-permission="desktopNotificationPermission"
@@ -178,6 +180,7 @@ const {
     v-else
     v-model:message-input="messageInput"
     :connection-status="connectionStatus"
+    :media-connection-status="mediaConnectionStatus"
     :status="status"
     :sound-reminder-enabled="soundReminderEnabled"
     :chat-history-enabled="chatHistoryEnabled"

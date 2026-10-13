@@ -9,6 +9,12 @@ import {
   type DesktopNotificationPermission
 } from '../utils/desktopNotification';
 import { createFrontendLogger } from '../utils/frontendLogger';
+import {
+  getControlConnectionStatus,
+  getMediaConnectionStatus,
+  type ControlConnectionState,
+  type MediaConnectionState
+} from '../utils/connectionStatus';
 import { assembleImageChunks, createImageChunks, dataUrlToBlob, type ImageChunk } from '../utils/imageChunkTransfer';
 import { compressImageFileForChat, readBlobAsDataUrl } from '../utils/imageCompression';
 import { getGuestNameFromSearch } from '../utils/guestIdentity';
@@ -71,7 +77,9 @@ export function useChatOnlineApp() {
   const loadingPublicRooms = ref(false);
   const copiedRoomId = ref('');
   const messageInput = ref('');
-  const connectionStatus = ref('等待连接');
+  const controlConnectionState = ref<ControlConnectionState>('idle');
+  const controlReconnectAttempt = ref(0);
+  const mediaConnectionState = ref<MediaConnectionState>('idle');
   const soundReminderEnabled = ref(localStorage.getItem(storageKeys.soundReminder) !== 'off');
   const desktopNotificationPermission = ref<DesktopNotificationPermission>(getDesktopNotificationPermission());
   const desktopNotificationEnabled = ref(
@@ -199,15 +207,8 @@ export function useChatOnlineApp() {
    * 安排 WebSocket 断线重连。
    * @param generation 当前连接代际；核心分支为仅当前连接的异常断开会触发最多 3 次、每 5 秒一次的重连。
    * @param reconnect 重连回调；核心分支为 timer 触发时再次校验代际，避免旧连接误重连。
-   * @param reconnectingText 重连等待状态文案。
-   * @param stoppedText 重连耗尽后的状态文案。
    */
-  function scheduleSocketReconnect(
-    generation: number,
-    reconnect: () => void,
-    reconnectingText: (attempt: number) => string,
-    stoppedText: string
-  ): void {
+  function scheduleSocketReconnect(generation: number, reconnect: () => void): void {
     if (!shouldReconnectSocket.value || generation !== reconnectGeneration.value) {
       return;
     }
@@ -215,11 +216,12 @@ export function useChatOnlineApp() {
     const decision = reconnectPolicy.next();
 
     if (!decision.shouldReconnect) {
-      connectionStatus.value = stoppedText;
+      controlConnectionState.value = 'disconnected';
       return;
     }
 
-    connectionStatus.value = reconnectingText(decision.attempt);
+    controlReconnectAttempt.value = decision.attempt;
+    controlConnectionState.value = 'reconnecting';
     reconnectTimerRef.value = setTimeout(() => {
       if (!shouldReconnectSocket.value || generation !== reconnectGeneration.value) {
         return;
@@ -240,6 +242,7 @@ export function useChatOnlineApp() {
     clearMediaReconnectTimer();
     mediaSocketRef.value?.close();
     mediaSocketRef.value = null;
+    mediaConnectionState.value = 'idle';
     controlConnectionId.value = '';
     socketRef.value?.close();
     socketRef.value = null;
@@ -327,6 +330,11 @@ export function useChatOnlineApp() {
 
     return 'login';
   });
+
+  const connectionStatus = computed(() =>
+    getControlConnectionStatus(page.value === 'guest-chat' ? 'guest' : 'admin', controlConnectionState.value, controlReconnectAttempt.value)
+  );
+  const mediaConnectionStatus = computed(() => getMediaConnectionStatus(mediaConnectionState.value));
 
   const admin = computed<AdminInfo | null>(() => {
     const raw = localStorage.getItem(storageKeys.admin);
@@ -1331,7 +1339,8 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
    */
   function reconnectControlSocketForMedia(roomId: string, role: MessageFrom): void {
     clearMediaReconnectTimer();
-    connectionStatus.value = '图片通道多次重连失败，正在重建实时连接';
+    controlConnectionState.value = 'rebuilding';
+    mediaConnectionState.value = 'unavailable';
     markPendingImageStartsUnconfirmed();
     mediaSocketRef.value = null;
 
@@ -1365,7 +1374,7 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
     }
 
     clearMediaReconnectTimer();
-    connectionStatus.value = '图片通道已断开，正在重连';
+    mediaConnectionState.value = 'reconnecting';
     mediaReconnectTimerRef.value = setTimeout(() => {
       if (!shouldReconnectSocket.value || controlConnectionId.value !== connectionId || socketRef.value?.readyState !== WebSocket.OPEN) {
         return;
@@ -1384,9 +1393,11 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
   function connectMediaSocket(roomId: string, role: MessageFrom, connectionId: string): void {
     clearMediaReconnectTimer();
     mediaSocketRef.value?.close();
+    mediaConnectionState.value = 'connecting';
     mediaSocketRef.value = createMediaSocket(buildMediaSocketUrl(roomId, role, connectionId), {
       onOpen: () => {
         mediaReconnectRecovery.markMediaOpened();
+        mediaConnectionState.value = 'connected';
         flushAllPendingImageChunks();
       },
       onClose: () => {
@@ -1980,7 +1991,7 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
     const token = getToken();
 
     if (!roomId || !token) {
-      connectionStatus.value = '请选择聊天室';
+      controlConnectionState.value = 'room-unselected';
       return;
     }
 
@@ -1990,12 +2001,12 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
       `${protocol}//${window.location.host}/ws/chat?role=admin&roomId=${encodeURIComponent(roomId)}&token=${encodeURIComponent(token)}`
     );
     socketRef.value = socket;
-    connectionStatus.value = '正在连接实时服务';
+    controlConnectionState.value = 'connecting';
     let stopHeartbeat: (() => void) | null = null;
 
     socket.addEventListener('open', () => {
       reconnectPolicy.reset();
-      connectionStatus.value = '实时服务已连接';
+      controlConnectionState.value = 'connected';
       stopHeartbeat?.();
       stopHeartbeat = startSocketHeartbeat(socket);
     });
@@ -2097,11 +2108,10 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
       markPendingImageStartsUnconfirmed();
       mediaSocketRef.value?.close();
       mediaSocketRef.value = null;
+      mediaConnectionState.value = 'idle';
       scheduleSocketReconnect(
         generation,
-        () => connectChatSocket(roomId),
-        (attempt) => `实时服务已断开，5 秒后第 ${attempt} 次重连`,
-        '实时服务已断开，等待下次重连'
+        () => connectChatSocket(roomId)
       );
     });
   }
@@ -2112,7 +2122,7 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
    */
   function connectGuestChatSocket(roomId: string): void {
     if (!roomId) {
-      connectionStatus.value = '聊天室不可用';
+      controlConnectionState.value = 'room-unavailable';
       return;
     }
 
@@ -2124,12 +2134,12 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
         `&guestSessionId=${encodeURIComponent(guestIdentity.guestSessionId)}&guestName=${encodeURIComponent(guestIdentity.username)}`
     );
     socketRef.value = socket;
-    connectionStatus.value = '正在连接客服';
+    controlConnectionState.value = 'connecting';
     let stopHeartbeat: (() => void) | null = null;
 
     socket.addEventListener('open', () => {
       reconnectPolicy.reset();
-      connectionStatus.value = '已进入聊天室';
+      controlConnectionState.value = 'connected';
       stopHeartbeat?.();
       stopHeartbeat = startSocketHeartbeat(socket);
     });
@@ -2228,11 +2238,10 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
       markPendingImageStartsUnconfirmed();
       mediaSocketRef.value?.close();
       mediaSocketRef.value = null;
+      mediaConnectionState.value = 'idle';
       scheduleSocketReconnect(
         generation,
-        () => connectGuestChatSocket(roomId),
-        (attempt) => `连接已断开，5 秒后第 ${attempt} 次重连`,
-        '连接已断开，等待下次重连'
+        () => connectGuestChatSocket(roomId)
       );
     });
   }
@@ -2306,6 +2315,7 @@ function hasIncomingImageMessage(imageId: string, from: RelayRoomUser | null): b
     copiedRoomId,
     messageInput,
     connectionStatus,
+    mediaConnectionStatus,
     soundReminderEnabled,
     desktopNotificationEnabled,
     desktopNotificationPermission,

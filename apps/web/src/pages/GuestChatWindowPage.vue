@@ -8,6 +8,7 @@ import type { ChatMessage, PendingImage, StatusType } from '../types';
  */
 defineProps<{
   connectionStatus: string;
+  mediaConnectionStatus: string;
   status: { message: string; type: StatusType };
   soundReminderEnabled: boolean;
   chatHistoryEnabled: boolean;
@@ -66,6 +67,7 @@ function updateMessageInput(event: Event): void {
             <span>保存记录</span>
           </label>
           <span>{{ connectionStatus }}</span>
+          <span v-if="mediaConnectionStatus" class="media-connection-status" role="status">{{ mediaConnectionStatus }}</span>
         </div>
       </header>
       <div :ref="setMessageTimelineElement" class="message-timeline guest-timeline" aria-live="polite">
